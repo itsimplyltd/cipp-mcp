@@ -148,6 +148,22 @@ function nonEmpty(value: unknown): value is string {
 
 /** Auto-reply states `Set-CIPPOutOfOffice` accepts (its own ValidateSet). */
 const OOO_STATES = ['Enabled', 'Disabled', 'Scheduled'] as const;
+
+/**
+ * Entra object id. `Invoke-ListUserSigninLogs` interpolates `UserID` into
+ * `userId eq '...'` on Graph `auditLogs/signIns`, and that property is this
+ * GUID. A UPN is a string Graph rejects as an invalid GUID.
+ */
+const ENTRA_OBJECT_ID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Graph's maximum page size for `auditLogs/signIns`. CIPP forwards `top`
+ * straight into `$top` and does not page (`-noPagination`), so a larger
+ * value is an upstream error rather than more history.
+ */
+const SIGNIN_LOG_MAX_TOP = 1000;
+
 type OutOfOfficeState = (typeof OOO_STATES)[number];
 
 /**
@@ -807,8 +823,7 @@ export class CippService {
     upnOrId: string,
     reason: string
   ): Promise<{ id: string; userPrincipalName: string; username: string; domain: string }> {
-    const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const byId = GUID_RE.test(upnOrId);
+    const byId = ENTRA_OBJECT_ID_RE.test(upnOrId);
 
     const rows = await this.request<Array<Record<string, unknown>>>('GET', 'ListUsers', {
       tenantFilter,
@@ -1077,6 +1092,93 @@ export class CippService {
    */
   async listUserGroups<T = unknown>(tenantFilter: string, userId: string): Promise<T> {
     return this.request<T>('GET', 'ListUserGroups', { tenantFilter, userId });
+  }
+
+  /**
+   * List recent interactive Entra sign-ins for one user, newest first.
+   * Calls the `ListUserSigninLogs` Azure Function (`Invoke-ListUserSigninLogs`).
+   *
+   * Upstream reads three query parameters and nothing else:
+   *
+   * ```powershell
+   * $top = $Request.Query.top ? $Request.Query.top : 50
+   * $TenantFilter = $Request.Query.tenantFilter
+   * $UserID = $Request.Query.UserID
+   * $URI = "https://graph.microsoft.com/beta/auditLogs/signIns?" +
+   *        "`$filter=(userId eq '$UserID')&`$top=$top&`$orderby=createdDateTime desc"
+   * ```
+   *
+   * `UserID` is the query-string name (not `userId`). The value is interpolated
+   * into a filter on the sign-in `userId` property, which is the Entra object
+   * id. A UPN makes Graph reject the filter and CIPP return HTTP 500, so a UPN
+   * is resolved through `ListUsers` first. A GUID is sent as-is: sign-in
+   * history for a deleted user is exactly the case where `ListUsers` no longer
+   * has a row.
+   *
+   * The function has no `AllTenants` branch, requests a single page
+   * (`-noPagination $true`), and does not set `signInEventTypes`, so Graph
+   * returns interactive sign-ins only. Failures are HTTP 500 with the error
+   * string in the body — `request()` surfaces that rather than an empty list.
+   *
+   * @param tenantFilter - Tenant domain or identifier. `allTenants` is not supported.
+   * @param userId       - Entra object id, or a UPN resolved to one.
+   * @param top          - Page size. Omit for CIPP's default of 50. Maximum 1000.
+   */
+  async listUserSigninLogs<T = unknown>(
+    tenantFilter: string,
+    userId: string,
+    top?: number
+  ): Promise<T> {
+    if (tenantFilter.trim().toLowerCase() === 'alltenants') {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'cipp_list_user_signin_logs reads one user in one tenant; allTenants is not supported. ' +
+          'Invoke-ListUserSigninLogs calls Graph auditLogs/signIns for a single tenantFilter and has no all-tenants branch.'
+      );
+    }
+
+    const identity = userId.trim();
+    if (!identity) {
+      throw new McpError(
+        ErrorCode.InvalidParams,
+        'userId is required. Pass an Entra object id, or a UPN such as alice@contoso.com.'
+      );
+    }
+
+    let objectId = identity;
+    if (!ENTRA_OBJECT_ID_RE.test(identity)) {
+      if (!identity.includes('@')) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `userId must be an Entra object id or a UPN. CIPP filters Graph auditLogs/signIns ` +
+            `with userId eq '<value>', and that property is the object id. Received ${JSON.stringify(userId)}.`
+        );
+      }
+      const resolved = await this.resolveUserIdentity(
+        tenantFilter,
+        identity,
+        'Sign-in logs are filtered on the Entra object id. A deleted user will not resolve from a UPN — query them by object id.'
+      );
+      objectId = resolved.id;
+    }
+
+    if (top !== undefined) {
+      if (typeof top !== 'number' || !Number.isInteger(top) || top < 1 || top > SIGNIN_LOG_MAX_TOP) {
+        throw new McpError(
+          ErrorCode.InvalidParams,
+          `top must be an integer from 1 to ${SIGNIN_LOG_MAX_TOP} (Graph's page size for auditLogs/signIns). ` +
+            `Omit it to use CIPP's default of 50. Received ${JSON.stringify(top)}.`
+        );
+      }
+    }
+
+    return this.request<T>('GET', 'ListUserSigninLogs', {
+      tenantFilter,
+      // Invoke-ListUserSigninLogs reads `$Request.Query.UserID`, then
+      // interpolates it into `userId eq '...'`. `userId` matches nothing.
+      UserID: objectId,
+      ...(top !== undefined ? { top } : {}),
+    });
   }
 
   /**

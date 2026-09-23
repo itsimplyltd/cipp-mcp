@@ -490,6 +490,52 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
       required: ['tenantFilter', 'userId'],
     },
   },
+  {
+    name: 'cipp_list_user_signin_logs',
+    description:
+      "List a user's recent interactive Entra sign-ins, newest first. Wraps CIPP " +
+      'ListUserSigninLogs (GET /api/ListUserSigninLogs), which calls Graph ' +
+      'GET /beta/auditLogs/signIns filtered to that user. Returns one page of at most ' +
+      '`top` events (default 50, maximum 1000); CIPP does not page further. Graph returns ' +
+      'interactive sign-ins only for this query — non-interactive sign-ins are absent. ' +
+      "allTenants is not supported.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: {
+          type: 'string',
+          description:
+            "Tenant domain name or ID that owns the user. 'allTenants' is not supported — " +
+            'Invoke-ListUserSigninLogs queries a single tenant.',
+        },
+        userId: {
+          type: 'string',
+          description:
+            'Entra object id (GUID) of the user, or their UPN (e.g. alice@contoso.com). ' +
+            "CIPP filters auditLogs/signIns with userId eq '<object id>'. A UPN is resolved " +
+            'to that id first. Sign-in history for a user who has already been deleted is ' +
+            'only available by object id.',
+        },
+        top: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 1000,
+          description:
+            'How many of the most recent interactive sign-ins to return. Omit for CIPP\'s ' +
+            'default of 50. Maximum 1000, which is Graph\'s page size for this API. Older ' +
+            'events beyond this count are not returned.',
+        },
+      },
+      required: ['tenantFilter', 'userId'],
+    },
+    annotations: {
+      title: 'List user sign-in logs',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
 
   // -------------------------------------------------------------------------
   // Group tools
@@ -1168,6 +1214,7 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
     'cipp_list_mfa_users',
     'cipp_list_user_devices',
     'cipp_list_user_groups',
+    'cipp_list_user_signin_logs',
   ],
   groups: ['cipp_list_groups', 'cipp_create_group'],
   mailboxes: [

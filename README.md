@@ -4,7 +4,7 @@ MCP (Model Context Protocol) server for [CIPP](https://github.com/KelvinTegelaar
 
 ## Features
 
-- **45 tools** across 12 categories
+- **46 tools** across 12 categories
 - Tenant, user, group, and mailbox management
 - Mailbox and online-archive size reporting, per tenant or per user
 - Security: Conditional Access policies, named locations
@@ -93,7 +93,7 @@ Add to your `claude_desktop_config.json`:
 | Category | Tools |
 |---|---|
 | Tenants | list_tenants, get_tenant_details |
-| Users | list_users, create_user, edit_user, disable_user, reset_password, reset_mfa, revoke_sessions, offboard_user, bec_check, list_mfa_users, list_user_devices, list_user_groups |
+| Users | list_users, create_user, edit_user, disable_user, reset_password, reset_mfa, revoke_sessions, offboard_user, bec_check, list_mfa_users, list_user_devices, list_user_groups, list_user_signin_logs |
 | Groups | list_groups, create_group |
 | Mailboxes | list_mailboxes, list_mailbox_permissions, list_mailbox_usage, get_mailbox_usage, set_out_of_office, set_email_forwarding |
 | Security | list_conditional_access_policies, list_named_locations |
@@ -104,6 +104,32 @@ Add to your `claude_desktop_config.json`:
 | GDAP | list_gdap_roles, list_gdap_invites |
 | Scheduler | list_scheduled_items, add_scheduled_item |
 | Core | ping, get_version, list_logs |
+
+### User sign-in logs
+
+`list_user_signin_logs` returns one user's most recent interactive Entra
+sign-ins. It wraps CIPP's existing `ListUserSigninLogs` function
+(`GET /api/ListUserSigninLogs`) — there is no separate Graph call from this
+server. `Invoke-ListUserSigninLogs` reads `tenantFilter`, `UserID`, and `top`
+(default 50) and requests:
+
+```
+GET /beta/auditLogs/signIns?$filter=(userId eq '<object id>')&$top=<top>&$orderby=createdDateTime desc
+```
+
+with pagination disabled, so the tool returns a single page. Omit `top` for
+CIPP's default of 50; the maximum is 1000, Graph's page size for this API.
+
+`userId` on the sign-in resource is the Entra object id. Pass that id, or pass
+a UPN and the tool resolves it through `ListUsers` before calling CIPP. A user
+who has already been deleted will not resolve from a UPN — query them by
+object id. `allTenants` is rejected: the function has no all-tenants branch.
+
+Graph returns interactive sign-ins only unless the filter names another
+`signInEventTypes` value, and CIPP's filter does not, so non-interactive
+sign-ins are absent from this result. Events outside Entra's sign-in retention
+window are absent too. A failure upstream is HTTP 500 with the error text in
+the body; the tool surfaces that rather than an empty list.
 
 ### Mailbox and archive sizes
 
