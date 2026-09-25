@@ -2,10 +2,14 @@
 
 MCP (Model Context Protocol) server for [CIPP](https://github.com/KelvinTegelaar/CIPP) — the CyberDrain Improved Partner Portal. Provides AI assistants with structured access to CIPP's M365 multi-tenant management capabilities.
 
+> **This is IT Simply's read-only fork.** 14 write-capable tools present in
+> upstream have been removed. See [IT Simply modifications](#it-simply-modifications)
+> below.
+
 ## Features
 
-- **45 tools** across 12 categories
-- Tenant, user, group, and mailbox management
+- **31 tools** across 12 categories, all read-only
+- Tenant, user, group, and mailbox visibility
 - Mailbox and online-archive size reporting, per tenant or per user
 - Security: Conditional Access policies, named locations
 - Standards & compliance: BPA, domain health, drift detection
@@ -93,16 +97,16 @@ Add to your `claude_desktop_config.json`:
 | Category | Tools |
 |---|---|
 | Tenants | list_tenants, get_tenant_details |
-| Users | list_users, create_user, edit_user, disable_user, reset_password, reset_mfa, revoke_sessions, offboard_user, bec_check, list_mfa_users, list_user_devices, list_user_groups |
-| Groups | list_groups, create_group |
-| Mailboxes | list_mailboxes, list_mailbox_permissions, list_mailbox_usage, get_mailbox_usage, set_out_of_office, set_email_forwarding |
+| Users | list_users, bec_check, list_mfa_users, list_user_devices, list_user_groups |
+| Groups | list_groups |
+| Mailboxes | list_mailboxes, list_mailbox_permissions, list_mailbox_usage, get_mailbox_usage |
 | Security | list_conditional_access_policies, list_named_locations |
 | Applications | list_enterprise_apps |
-| Standards | list_standards, run_standards_check, list_standard_templates, get_tenant_drift, get_tenant_alignment, create_standard_template, delete_standard_template, list_bpa, list_domain_health |
+| Standards | list_standards, list_standard_templates, get_tenant_drift, get_tenant_alignment, list_bpa, list_domain_health |
 | Licenses | list_licenses, list_csp_licenses |
 | Alerts | list_audit_logs, list_alert_queue |
 | GDAP | list_gdap_roles, list_gdap_invites |
-| Scheduler | list_scheduled_items, add_scheduled_item |
+| Scheduler | list_scheduled_items |
 | Core | ping, get_version, list_logs |
 
 ### Mailbox and archive sizes
@@ -134,27 +138,6 @@ Two caveats worth knowing:
   decimal places of a gigabyte before returning, so `get_mailbox_usage` byte
   counts are accurate to roughly 10 MB. Quotas are exact — they are recovered
   from the raw `Get-Mailbox` string, which carries the true byte count.
-
-### CIPP version compatibility
-
-Request bodies are shaped against CIPP's own `Invoke-*.ps1` handlers and are
-written to satisfy both current and older CIPP builds — where the two differ,
-the server sends the form both accept. Three behaviours are worth knowing:
-
-- **`offboard_user` reports queued, not completed.** CIPP's `ExecOffboardUser`
-  returns HTTP 200 the instant the job is created; it never waits for or reports
-  the offboarding result. Confirm the outcome in CIPP's Offboarding view before
-  treating an account as offboarded. The tool refuses a call with no actions
-  selected, since that would otherwise queue a job that succeeds while doing
-  nothing.
-- **Some endpoints report failure under HTTP 200.** `EditUser`,
-  `AddScheduledItem` and `ExecOffboardUser` return error text in `Results`
-  rather than an error status. These tools parse `Results` and return
-  `status: "failed"`; do not treat a 200 as success.
-- **Two parameters need a recent CIPP.** `offboard_user`'s
-  `DisableOneDriveSharing` and `set_out_of_office`'s `timezone` are ignored by
-  older builds rather than erroring — so an offboarding that selects *only*
-  `DisableOneDriveSharing` will run no actions on an older CIPP.
 
 ## Authentication Setup
 
@@ -208,6 +191,58 @@ directly in the `ApiClients` table of your CIPP storage account.
 
 **CIPP-sponsored hosting:** Ask the CIPP team to add your server's public IP to your
 API client's allowed range.
+
+## IT Simply modifications
+
+This is IT Simply Ltd's fork of [`WYRE-AI/cipp-mcp`](https://github.com/WYRE-AI/cipp-mcp),
+forked from upstream commit [`56e39301`](https://github.com/WYRE-AI/cipp-mcp/commit/56e39301a07b34fede5ca59c424a94b85f8f4ba4).
+Per Apache License 2.0 §4(b), this notice records that the files below were
+changed from that upstream version.
+
+**14 write-capable tools were removed** — their tool definitions, dispatch
+cases, and underlying `CippService` HTTP methods — so this server can only
+read CIPP data, never modify a managed tenant. This is deliberate: CIPP can
+reset passwords, delete accounts, redirect mail, and push conditional access
+policies across every customer tenant it manages, and IT Simply runs this
+server with read-only intent. Deleting the code, rather than gating it behind
+a configuration flag, means there is no flag to mistype and no write path left
+for a future tool to reach even if reintroduced.
+
+Removed tools:
+
+| Tool | Reason |
+|---|---|
+| `cipp_create_user` | creates an AAD user |
+| `cipp_edit_user` | edits attributes, adds/strips licences |
+| `cipp_disable_user` | blocks sign-in |
+| `cipp_reset_password` | invalidates the current password |
+| `cipp_reset_mfa` | clears all MFA methods |
+| `cipp_revoke_sessions` | kills sessions and refresh tokens |
+| `cipp_offboard_user` | can pass `DeleteUser: true` — irreversible |
+| `cipp_create_group` | creates an AAD group |
+| `cipp_set_out_of_office` | sets mailbox auto-reply |
+| `cipp_set_email_forwarding` | redirects mail; a data-exfiltration vector |
+| `cipp_run_standards_check` | reads as a check, but applies remediation if the tenant's Standards Template has a Remediate-action standard |
+| `cipp_create_standard_template` | upserts a template that modifies tenants on the next standards run |
+| `cipp_delete_standard_template` | silently un-enforces whatever it enforced |
+| `cipp_add_scheduled_item` | forwards an arbitrary command string to CIPP's scheduler, optionally against every managed tenant |
+
+`tests/tool-guard.test.ts` is new IT Simply code (not present upstream) that
+asserts `TOOL_DEFINITIONS.length === 31` and that none of the 14 names above
+are present, so a future `git merge upstream/main` that silently reintroduces
+one of these tools fails the build rather than shipping.
+
+Files changed from upstream: `src/mcp/tool.definitions.ts`,
+`src/handlers/tool.handler.ts`, `src/services/cipp.service.ts`,
+`tests/cipp.service.standards.test.ts`, `README.md` (this file), and the
+addition of `tests/tool-guard.test.ts`. Five now-dead test files that covered
+only removed tools were deleted:
+`tests/cipp.service.create-user.test.ts`, `tests/cipp.service.edit-user.test.ts`,
+`tests/cipp.service.offboard-user.test.ts`, `tests/cipp.service.mailbox.test.ts`,
+`tests/cipp.service.scheduled-items.test.ts`.
+
+`listEnterpriseApps` was kept: it calls CIPP's `ListGraphRequest` relay with a
+hardcoded GET query and is a legitimate read, not a write in disguise.
 
 ## License
 

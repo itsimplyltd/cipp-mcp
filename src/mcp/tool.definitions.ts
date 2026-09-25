@@ -109,341 +109,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
-    name: 'cipp_create_user',
-    description:
-      '⚠ HIGH-IMPACT. Creates a new user account in the tenant, which grants ' +
-      'directory presence and may include initial credentials and license/role ' +
-      'eligibility. Reversible by deleting or disabling the user. ' +
-      'Confirm with the user before invoking.',
-    annotations: {
-      title: 'Create user (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        displayName: {
-          type: 'string',
-          description:
-            "The user's full display name as it will appear in the directory (e.g. 'Alice Smith').",
-        },
-        userPrincipalName: {
-          type: 'string',
-          description:
-            "The user's sign-in address / UPN (e.g. alice@contoso.com). Must be unique within the tenant.",
-        },
-        password: {
-          type: 'string',
-          description:
-            'Initial password for the account. Should meet the tenant password complexity policy.',
-        },
-        givenName: {
-          type: 'string',
-          description: "The user's first (given) name.",
-        },
-        surname: {
-          type: 'string',
-          description: "The user's last name (surname).",
-        },
-        jobTitle: {
-          type: 'string',
-          description: "The user's job title as it appears in the directory.",
-        },
-        department: {
-          type: 'string',
-          description: 'The department the user belongs to.',
-        },
-        country: {
-          type: 'string',
-          description:
-            "Two-letter ISO 3166-1 alpha-2 country code representing the user's location (e.g. 'US', 'GB').",
-        },
-      },
-      required: ['tenantFilter', 'displayName', 'userPrincipalName', 'password'],
-    },
-  },
-  {
-    name: 'cipp_edit_user',
-    description:
-      "⚠ HIGH-IMPACT. Edits an existing user's properties, which can include " +
-      'directory attributes, usage location, and may grant or revoke roles or ' +
-      'license eligibility. Reversible by editing again. ' +
-      'Confirm with the user before invoking.',
-    annotations: {
-      title: 'Edit user (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: {
-          type: 'string',
-          description: "The user's Azure AD object ID or UPN to identify the account to modify.",
-        },
-        displayName: {
-          type: 'string',
-          description: 'Updated full display name for the user.',
-        },
-        jobTitle: {
-          type: 'string',
-          description: 'Updated job title for the user.',
-        },
-        department: {
-          type: 'string',
-          description: 'Updated department for the user.',
-        },
-        usageLocation: {
-          type: 'string',
-          description:
-            "Two-letter ISO 3166-1 alpha-2 country code for license assignment eligibility (e.g. 'US'). Required before assigning most Microsoft 365 licences.",
-        },
-        licenses: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            'License SKU GUIDs the user should hold after the edit (CIPP reconciles: missing SKUs are added, extra assigned SKUs are removed). Use cipp_list_licenses to discover SKU ids. Mutually exclusive with removeLicenses=true.',
-        },
-        removeLicenses: {
-          type: 'boolean',
-          description:
-            '⚠ When true, strips EVERY license assigned to the user. Mutually exclusive with a non-empty licenses list.',
-        },
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
-    name: 'cipp_disable_user',
-    description:
-      '⚠ HIGH-IMPACT. Disables a user account, blocking sign-in. Reversible by ' +
-      're-enabling the account. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Disable user (reversible)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: USER_ID_PROP,
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
-    name: 'cipp_reset_password',
-    description:
-      '⚠ HIGH-IMPACT. Resets a user\'s password, invalidating their current ' +
-      'password. Reversible by setting a new password. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Reset password (reversible)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: USER_ID_PROP,
-        newPassword: {
-          type: 'string',
-          description:
-            'The replacement password to set. If omitted, a random password is generated and returned in the response.',
-        },
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
-    name: 'cipp_reset_mfa',
-    description:
-      '⚠ HIGH-IMPACT. Resets all MFA methods for a user, requiring them to ' +
-      're-register their authentication methods. Reversible by re-enabling MFA. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Reset MFA (reversible)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: USER_ID_PROP,
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
-    name: 'cipp_revoke_sessions',
-    description:
-      '⚠ HIGH-IMPACT. Revokes all active sessions for a user, forcing them to ' +
-      're-authenticate. Reversible by the user signing in again. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Revoke sessions (reversible)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: USER_ID_PROP,
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
-    name: 'cipp_offboard_user',
-    description:
-      '⚠ DESTRUCTIVE — IRREVERSIBLE. Queues CIPP\'s offboarding job for a user. ' +
-      'Every action is opt-in: at least one must be enabled or the call is rejected. ' +
-      'Returns once the job is QUEUED — CIPP reports success on task creation, not ' +
-      'completion, so confirm the outcome in CIPP\'s Offboarding view before ' +
-      'reporting the account as offboarded. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Offboard user (irreversible)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        userId: USER_ID_PROP,
-        DisableSignIn: {
-          type: 'boolean',
-          description: 'Disable the account so the user can no longer sign in.',
-        },
-        RevokeSessions: {
-          type: 'boolean',
-          description: 'Revoke all active sign-in sessions and refresh tokens.',
-        },
-        ResetPass: {
-          type: 'boolean',
-          description: 'Reset the account password to a new random value.',
-        },
-        RemoveLicenses: {
-          type: 'boolean',
-          description: 'Remove every license assigned to the user.',
-        },
-        RemoveGroups: {
-          type: 'boolean',
-          description: 'Remove the user from all groups they are a member of.',
-        },
-        RemoveMFADevices: {
-          type: 'boolean',
-          description: 'Remove all registered MFA methods for the user.',
-        },
-        RemoveMobile: {
-          type: 'boolean',
-          description: 'Remove the user\'s registered mobile devices.',
-        },
-        RemoveRules: {
-          type: 'boolean',
-          description: 'Remove all inbox rules from the mailbox.',
-        },
-        RemoveTeamsPhoneDID: {
-          type: 'boolean',
-          description: 'Release the Teams phone number (DID) assigned to the user.',
-        },
-        removeCalendarInvites: {
-          type: 'boolean',
-          description: 'Cancel calendar invites the user organised.',
-        },
-        removePermissions: {
-          type: 'boolean',
-          description:
-            "Remove the user's delegated access to other mailboxes across the tenant.",
-        },
-        removeCalendarPermissions: {
-          type: 'boolean',
-          description:
-            "Remove the user's permissions on other users' calendars across the tenant.",
-        },
-        ConvertToShared: {
-          type: 'boolean',
-          description:
-            'Convert the mailbox to a shared mailbox so it can be retained without a license.',
-        },
-        HideFromGAL: {
-          type: 'boolean',
-          description: 'Hide the mailbox from the Global Address List.',
-        },
-        disableForwarding: {
-          type: 'boolean',
-          description: 'Remove any existing forwarding configured on the mailbox.',
-        },
-        DisableOneDriveSharing: {
-          type: 'boolean',
-          description:
-            "Revoke sharing links on the user's OneDrive. Requires a recent CIPP build; older ones ignore it.",
-        },
-        ClearImmutableId: {
-          type: 'boolean',
-          description:
-            'Clear the immutable ID, breaking the link to an on-premises AD object.',
-        },
-        DeleteUser: {
-          type: 'boolean',
-          description:
-            '⚠ Delete the account outright. Do not combine with actions that need the account to exist afterwards.',
-        },
-        forward: {
-          type: 'string',
-          description:
-            "UPN to forward the user's incoming mail to. Omit to leave forwarding unchanged.",
-        },
-        KeepCopy: {
-          type: 'boolean',
-          description:
-            'When forwarding, keep a copy of each message in the original mailbox. Only meaningful alongside forward.',
-        },
-        OOO: {
-          type: 'string',
-          description:
-            'Out-of-office auto-reply message to set on the mailbox. Omit to leave the auto-reply unchanged.',
-        },
-        AccessAutomap: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            "UPNs to grant full access to the user's mailbox, automapped into their Outlook.",
-        },
-        AccessNoAutomap: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            "UPNs to grant full access to the user's mailbox without automapping.",
-        },
-        OnedriveAccess: {
-          type: 'array',
-          items: { type: 'string' },
-          description: "UPNs to grant access to the user's OneDrive.",
-        },
-      },
-      required: ['tenantFilter', 'userId'],
-    },
-  },
-  {
     name: 'cipp_bec_check',
     description: 'Run a Business Email Compromise check on a user',
     inputSchema: {
@@ -508,50 +173,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
         },
       },
       required: ['tenantFilter'],
-    },
-  },
-  {
-    name: 'cipp_create_group',
-    description:
-      '⚠ HIGH-IMPACT. Creates a new group in the tenant, which can be used for ' +
-      'security policy assignments (RBAC, Conditional Access) or mail distribution. ' +
-      'Reversible by deleting the group. Confirm with the user before invoking.',
-    annotations: {
-      title: 'Create group (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        displayName: {
-          type: 'string',
-          description: 'Human-readable name for the new group.',
-        },
-        description: {
-          type: 'string',
-          description: 'Optional free-text description of the group purpose.',
-        },
-        securityEnabled: {
-          type: 'boolean',
-          description:
-            'When true, the group can be used for security policy assignments (RBAC, Conditional Access, etc.).',
-        },
-        mailEnabled: {
-          type: 'boolean',
-          description:
-            'When true, the group is mail-enabled and can receive email. Required for Microsoft 365 groups.',
-        },
-        mailNickname: {
-          type: 'string',
-          description:
-            'The mail alias used as the local part of the group email address (e.g. "finance-team" for finance-team@contoso.com). Required when mailEnabled is true.',
-        },
-      },
-      required: ['tenantFilter', 'displayName'],
     },
   },
 
@@ -660,125 +281,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
       required: ['tenantFilter', 'upn'],
     },
   },
-  {
-    name: 'cipp_set_out_of_office',
-    description:
-      '⚠ HIGH-IMPACT. Configures the out-of-office / auto-reply for a mailbox, ' +
-      'which causes automated messages to be sent to internal and/or external ' +
-      'senders. Reversible by disabling the auto-reply. ' +
-      'Confirm with the user before invoking.',
-    annotations: {
-      title: 'Set out-of-office (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        upn: {
-          type: 'string',
-          description: 'User Principal Name of the mailbox to configure.',
-        },
-        state: {
-          type: 'string',
-          enum: ['Enabled', 'Disabled', 'Scheduled'],
-          description:
-            "Auto-reply state. 'Scheduled' replies only between startTime and endTime — useful during offboarding.",
-        },
-        internalMessage: {
-          type: 'string',
-          description:
-            'HTML or plain-text auto-reply message sent to senders within the same organisation. Omit to leave the existing message untouched.',
-        },
-        externalMessage: {
-          type: 'string',
-          description:
-            'HTML or plain-text auto-reply message sent to senders outside the organisation. Omit to leave the existing message untouched.',
-        },
-        startTime: {
-          type: 'string',
-          description:
-            "When the scheduled auto-reply starts — ISO 8601 datetime or Unix epoch seconds. Only valid when state is 'Scheduled'; CIPP defaults to now if omitted.",
-        },
-        endTime: {
-          type: 'string',
-          description:
-            "When the scheduled auto-reply ends — ISO 8601 datetime or Unix epoch seconds. Only valid when state is 'Scheduled'; CIPP defaults to 7 days after startTime if omitted.",
-        },
-        timezone: {
-          type: 'string',
-          description:
-            "Timezone the schedule is interpreted in (e.g. 'Eastern Standard Time'). Requires a recent CIPP build; older ones ignore it.",
-        },
-        createOOFEvent: {
-          type: 'boolean',
-          description:
-            "Create a calendar event covering the out-of-office window. Only valid when state is 'Scheduled'.",
-        },
-        oofEventSubject: {
-          type: 'string',
-          description:
-            "Subject line for the calendar event created by createOOFEvent. Only valid when state is 'Scheduled'.",
-        },
-        autoDeclineFutureRequestsWhenOOF: {
-          type: 'boolean',
-          description:
-            "Automatically decline meeting requests that arrive for the out-of-office window. Only valid when state is 'Scheduled'.",
-        },
-        declineEventsForScheduledOOF: {
-          type: 'boolean',
-          description:
-            "Decline existing meetings that fall inside the out-of-office window. Only valid when state is 'Scheduled'.",
-        },
-        declineMeetingMessage: {
-          type: 'string',
-          description:
-            "Message sent when a meeting is declined. Only valid when state is 'Scheduled'.",
-        },
-      },
-      required: ['tenantFilter', 'upn', 'state'],
-    },
-  },
-  {
-    name: 'cipp_set_email_forwarding',
-    description:
-      '⚠ HIGH-IMPACT. Configures email forwarding on a mailbox, silently ' +
-      "redirecting the user's incoming mail to another address. This is a common " +
-      'data-exfiltration vector. Reversible by removing the forwarding rule. ' +
-      'Confirm with the user before invoking.',
-    annotations: {
-      title: 'Set email forwarding (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-        upn: {
-          type: 'string',
-          description: 'User Principal Name of the mailbox to configure forwarding on.',
-        },
-        forwardTo: {
-          type: 'string',
-          description:
-            'Email address to forward incoming messages to. Omit this parameter to disable forwarding.',
-        },
-        keepCopy: {
-          type: 'boolean',
-          description:
-            'When true (default), a copy of each forwarded message is retained in the original mailbox.',
-          default: true,
-        },
-      },
-      required: ['tenantFilter', 'upn'],
-    },
-  },
 
   // -------------------------------------------------------------------------
   // Security tools
@@ -842,17 +344,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
     },
   },
   {
-    name: 'cipp_run_standards_check',
-    description: 'Trigger a standards compliance check for a tenant',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tenantFilter: TENANT_FILTER_PROP,
-      },
-      required: ['tenantFilter'],
-    },
-  },
-  {
     name: 'cipp_list_standard_templates',
     description: 'List the CIPP Standards Templates configured across the partner tenant.',
     inputSchema: {
@@ -906,57 +397,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
       title: 'Get tenant standards alignment',
       readOnlyHint: true,
       destructiveHint: false,
-    },
-  },
-  {
-    name: 'cipp_create_standard_template',
-    description:
-      '⚠ HIGH-IMPACT. Creates or updates a CIPP Standards Template (upsert by ' +
-      'GUID). A template assigned to tenants with any Remediate-action standard ' +
-      'WILL modify those tenants on the next standards run. ' +
-      'Confirm with the user before invoking.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        template: {
-          type: 'object',
-          description:
-            'The full Standards Template JSON object. Must include a "tenantFilter" ' +
-            'assigning it to at least one tenant.',
-        },
-      },
-      required: ['template'],
-    },
-    annotations: {
-      title: 'Create/update standards template (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  {
-    name: 'cipp_delete_standard_template',
-    description:
-      '⚠ HIGH-IMPACT. Permanently deletes a CIPP Standards Template by ID. ' +
-      'Tenants assigned to it lose the standards it enforced. ' +
-      'Confirm with the user before invoking.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        templateId: {
-          type: 'string',
-          description: 'The GUID of the Standards Template to delete.',
-        },
-      },
-      required: ['templateId'],
-    },
-    annotations: {
-      title: 'Delete standards template (high-impact)',
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: true,
     },
   },
   {
@@ -1069,46 +509,6 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {},
     },
   },
-  {
-    name: 'cipp_add_scheduled_item',
-    description: 'Create a new scheduled task',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        taskName: {
-          type: 'string',
-          description: 'Human-readable name to identify this scheduled task in the CIPP UI.',
-        },
-        command: {
-          type: 'string',
-          description:
-            'The CIPP function or command to execute on the schedule (e.g. "Get-CIPPAlerts").',
-        },
-        scheduledTime: {
-          type: 'string',
-          description:
-            'When the task should first run — an ISO 8601 datetime (e.g. "2026-06-01T09:00:00Z") or Unix epoch seconds. Converted to epoch seconds before it is sent to CIPP.',
-        },
-        recurrence: {
-          type: 'string',
-          description:
-            'Cron expression or friendly recurrence interval (e.g. "0 9 * * 1" for every Monday at 09:00, or "Daily"). Omit for a one-off task.',
-        },
-        tenantFilter: {
-          type: 'string',
-          description:
-            "Optional tenant domain name or ID to scope the scheduled task. Use 'allTenants' to run across every managed tenant.",
-        },
-        parameters: {
-          type: 'object',
-          description:
-            'Arguments passed to the scheduled command, keyed by parameter name. Omit only when the command genuinely takes no arguments — without it the command runs bare.',
-          additionalProperties: true,
-        },
-      },
-      required: ['taskName', 'command', 'scheduledTime'],
-    },
-  },
 
   // -------------------------------------------------------------------------
   // Core tools
@@ -1157,43 +557,31 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
   tenants: ['cipp_list_tenants', 'cipp_get_tenant_details'],
   users: [
     'cipp_list_users',
-    'cipp_create_user',
-    'cipp_edit_user',
-    'cipp_disable_user',
-    'cipp_reset_password',
-    'cipp_reset_mfa',
-    'cipp_revoke_sessions',
-    'cipp_offboard_user',
     'cipp_bec_check',
     'cipp_list_mfa_users',
     'cipp_list_user_devices',
     'cipp_list_user_groups',
   ],
-  groups: ['cipp_list_groups', 'cipp_create_group'],
+  groups: ['cipp_list_groups'],
   mailboxes: [
     'cipp_list_mailboxes',
     'cipp_list_mailbox_permissions',
     'cipp_list_mailbox_usage',
     'cipp_get_mailbox_usage',
-    'cipp_set_out_of_office',
-    'cipp_set_email_forwarding',
   ],
   security: ['cipp_list_conditional_access_policies', 'cipp_list_named_locations'],
   applications: ['cipp_list_enterprise_apps'],
   standards: [
     'cipp_list_standards',
-    'cipp_run_standards_check',
     'cipp_list_standard_templates',
     'cipp_get_tenant_drift',
     'cipp_get_tenant_alignment',
-    'cipp_create_standard_template',
-    'cipp_delete_standard_template',
     'cipp_list_bpa',
     'cipp_list_domain_health',
   ],
   licenses: ['cipp_list_licenses', 'cipp_list_csp_licenses'],
   alerts: ['cipp_list_audit_logs', 'cipp_list_alert_queue'],
   gdap: ['cipp_list_gdap_roles', 'cipp_list_gdap_invites'],
-  scheduler: ['cipp_list_scheduled_items', 'cipp_add_scheduled_item'],
+  scheduler: ['cipp_list_scheduled_items'],
   core: ['cipp_ping', 'cipp_get_version', 'cipp_list_logs'],
 };

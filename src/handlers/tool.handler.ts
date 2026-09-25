@@ -3,7 +3,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
-import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
+import { CippService } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
 import { TOOL_DEFINITIONS } from '../mcp/tool.definitions.js';
 
@@ -69,118 +69,6 @@ export class CippToolHandler {
           break;
         }
 
-        case 'cipp_create_user': {
-          const {
-            tenantFilter,
-            displayName,
-            userPrincipalName,
-            password,
-            givenName,
-            surname,
-            jobTitle,
-            department,
-            country,
-          } = args as {
-            tenantFilter: string;
-            displayName: string;
-            userPrincipalName: string;
-            password: string;
-            givenName?: string;
-            surname?: string;
-            jobTitle?: string;
-            department?: string;
-            country?: string;
-          };
-          const userData: Record<string, unknown> = {
-            displayName,
-            userPrincipalName,
-            password,
-          };
-          if (givenName !== undefined) userData.givenName = givenName;
-          if (surname !== undefined) userData.surname = surname;
-          if (jobTitle !== undefined) userData.jobTitle = jobTitle;
-          if (department !== undefined) userData.department = department;
-          if (country !== undefined) userData.country = country;
-          result = await this.cippService.createUser(tenantFilter, userData);
-          break;
-        }
-
-        case 'cipp_edit_user': {
-          const {
-            tenantFilter,
-            userId,
-            displayName,
-            jobTitle,
-            department,
-            usageLocation,
-            licenses,
-            removeLicenses,
-          } = args as {
-            tenantFilter: string;
-            userId: string;
-            displayName?: string;
-            jobTitle?: string;
-            department?: string;
-            usageLocation?: string;
-            licenses?: string[];
-            removeLicenses?: boolean;
-          };
-          const editData: Record<string, unknown> = {};
-          if (displayName !== undefined) editData.displayName = displayName;
-          if (jobTitle !== undefined) editData.jobTitle = jobTitle;
-          if (department !== undefined) editData.department = department;
-          if (usageLocation !== undefined) editData.usageLocation = usageLocation;
-          const licenseOptions =
-            licenses !== undefined || removeLicenses !== undefined
-              ? {
-                  ...(licenses !== undefined ? { licenses } : {}),
-                  ...(removeLicenses !== undefined ? { removeLicenses } : {}),
-                }
-              : undefined;
-          result = await this.cippService.editUser(tenantFilter, userId, editData, licenseOptions);
-          break;
-        }
-
-        case 'cipp_disable_user': {
-          const { tenantFilter, userId } = args as { tenantFilter: string; userId: string };
-          result = await this.cippService.disableUser(tenantFilter, userId);
-          break;
-        }
-
-        case 'cipp_reset_password': {
-          const { tenantFilter, userId, newPassword } = args as {
-            tenantFilter: string;
-            userId: string;
-            newPassword?: string;
-          };
-          result = await this.cippService.resetPassword(tenantFilter, userId, newPassword);
-          break;
-        }
-
-        case 'cipp_reset_mfa': {
-          const { tenantFilter, userId } = args as { tenantFilter: string; userId: string };
-          result = await this.cippService.resetMFA(tenantFilter, userId);
-          break;
-        }
-
-        case 'cipp_revoke_sessions': {
-          const { tenantFilter, userId } = args as { tenantFilter: string; userId: string };
-          result = await this.cippService.revokeSessions(tenantFilter, userId);
-          break;
-        }
-
-        case 'cipp_offboard_user': {
-          // Offboarding actions are named exactly as CIPP reads them, so the
-          // whole argument bag passes through untouched; the service selects
-          // the keys it recognises and rejects an empty action set.
-          const { tenantFilter, userId, ...offboardOptions } = args as {
-            tenantFilter: string;
-            userId: string;
-          } & Record<string, unknown>;
-          result = await this.cippService.offboardUser(tenantFilter, userId, offboardOptions);
-          break;
-        }
-
         case 'cipp_bec_check': {
           const { tenantFilter, userId } = args as { tenantFilter: string; userId: string };
           result = await this.cippService.becCheck(tenantFilter, userId);
@@ -211,31 +99,6 @@ export class CippToolHandler {
         case 'cipp_list_groups': {
           const { tenantFilter, search } = args as { tenantFilter: string; search?: string };
           result = await this.cippService.listGroups(tenantFilter, { search });
-          break;
-        }
-
-        case 'cipp_create_group': {
-          const {
-            tenantFilter,
-            displayName,
-            description,
-            securityEnabled,
-            mailEnabled,
-            mailNickname,
-          } = args as {
-            tenantFilter: string;
-            displayName: string;
-            description?: string;
-            securityEnabled?: boolean;
-            mailEnabled?: boolean;
-            mailNickname?: string;
-          };
-          const groupData: Record<string, unknown> = { displayName };
-          if (description !== undefined) groupData.description = description;
-          if (securityEnabled !== undefined) groupData.securityEnabled = securityEnabled;
-          if (mailEnabled !== undefined) groupData.mailEnabled = mailEnabled;
-          if (mailNickname !== undefined) groupData.mailNickname = mailNickname;
-          result = await this.cippService.createGroup(tenantFilter, groupData);
           break;
         }
 
@@ -275,33 +138,6 @@ export class CippToolHandler {
           break;
         }
 
-        case 'cipp_set_out_of_office': {
-          // The optional fields are named as the service expects, so they pass
-          // through as-is. The cast reflects the declared schema; the service
-          // validates `state` at runtime and rejects scheduled-only fields
-          // supplied for any other state.
-          const { tenantFilter, upn, ...oooData } = args as unknown as {
-            tenantFilter: string;
-            upn: string;
-          } & OutOfOfficeInput;
-          result = await this.cippService.setOutOfOffice(tenantFilter, upn, oooData);
-          break;
-        }
-
-        case 'cipp_set_email_forwarding': {
-          const { tenantFilter, upn, forwardTo, keepCopy } = args as {
-            tenantFilter: string;
-            upn: string;
-            forwardTo?: string;
-            keepCopy?: boolean;
-          };
-          const forwardData: Record<string, unknown> = {};
-          if (forwardTo !== undefined) forwardData.forwardTo = forwardTo;
-          if (keepCopy !== undefined) forwardData.keepCopy = keepCopy;
-          result = await this.cippService.setEmailForwarding(tenantFilter, upn, forwardData);
-          break;
-        }
-
         // -----------------------------------------------------------------------
         // Security
         // -----------------------------------------------------------------------
@@ -338,12 +174,6 @@ export class CippToolHandler {
           break;
         }
 
-        case 'cipp_run_standards_check': {
-          const { tenantFilter } = args as { tenantFilter: string };
-          result = await this.cippService.runStandardsCheck(tenantFilter);
-          break;
-        }
-
         case 'cipp_list_standard_templates': {
           result = await this.cippService.listStandardTemplates();
           break;
@@ -361,18 +191,6 @@ export class CippToolHandler {
         case 'cipp_get_tenant_alignment': {
           const { tenantFilter } = args as { tenantFilter?: string };
           result = await this.cippService.getTenantAlignment(tenantFilter);
-          break;
-        }
-
-        case 'cipp_create_standard_template': {
-          const { template } = args as { template: Record<string, unknown> };
-          result = await this.cippService.createStandardTemplate(template);
-          break;
-        }
-
-        case 'cipp_delete_standard_template': {
-          const { templateId } = args as { templateId: string };
-          result = await this.cippService.deleteStandardTemplate(templateId);
           break;
         }
 
@@ -441,27 +259,6 @@ export class CippToolHandler {
         // -----------------------------------------------------------------------
         case 'cipp_list_scheduled_items': {
           result = await this.cippService.listScheduledItems();
-          break;
-        }
-
-        case 'cipp_add_scheduled_item': {
-          const { taskName, command, scheduledTime, recurrence, tenantFilter, parameters } =
-            args as {
-              taskName: string;
-              command: string;
-              scheduledTime: string;
-              recurrence?: string;
-              tenantFilter?: string;
-              parameters?: Record<string, unknown>;
-            };
-          result = await this.cippService.addScheduledItem({
-            taskName,
-            command,
-            scheduledTime,
-            ...(recurrence !== undefined && { recurrence }),
-            ...(tenantFilter !== undefined && { tenantFilter }),
-            ...(parameters !== undefined && { parameters }),
-          });
           break;
         }
 
