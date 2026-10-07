@@ -87,19 +87,19 @@ CIPP MCP Server — M365 multi-tenant management platform for MSPs.
 Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.com").
 Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
 
-Always confirm destructive operations (disable user, offboard user, reset password) before executing.
+This server is read-only: it cannot create, change or delete anything in a tenant.
 
 Tool categories:
 - Tenants: list and inspect managed tenants
-- Users: list, create, edit, disable, offboard, MFA/session management, BEC check
-- Groups: list and create Azure AD groups
-- Mailboxes: list mailboxes and permissions, configure OoO and forwarding
+- Users: list users, sign-in logs, MFA status, BEC check
+- Groups: list Azure AD groups
+- Mailboxes: list mailboxes, permissions, sizes, trusted and blocked senders
 - Security: Conditional Access policies, named locations
 - Standards: compliance standards, BPA results, domain health
 - Licenses: per-tenant and CSP-level license reporting
 - Alerts: audit logs and alert queue
 - GDAP: roles and relationship invites
-- Scheduler: list and create scheduled tasks
+- Scheduler: list scheduled tasks
 - Core: ping, version, logs
 `.trim();
   }
