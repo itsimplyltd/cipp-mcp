@@ -32,8 +32,8 @@ const REMOVED_WRITE_TOOL_NAMES = [
 ] as const;
 
 describe('IT Simply read-only guard', () => {
-  it('exposes exactly 31 tools', () => {
-    expect(TOOL_DEFINITIONS.length).toBe(31);
+  it('exposes exactly 33 tools', () => {
+    expect(TOOL_DEFINITIONS.length).toBe(33);
   });
 
   it('never reintroduces a removed write tool', () => {

@@ -93,6 +93,16 @@ export class CippToolHandler {
           break;
         }
 
+        case 'cipp_list_user_signin_logs': {
+          const { tenantFilter, userId, top } = args as {
+            tenantFilter: string;
+            userId: string;
+            top?: number;
+          };
+          result = await this.cippService.listUserSigninLogs(tenantFilter, userId, { top });
+          break;
+        }
+
         // -----------------------------------------------------------------------
         // Groups
         // -----------------------------------------------------------------------
@@ -114,6 +124,12 @@ export class CippToolHandler {
         case 'cipp_list_mailbox_permissions': {
           const { tenantFilter, upn } = args as { tenantFilter: string; upn: string };
           result = await this.cippService.listMailboxPermissions(tenantFilter, upn);
+          break;
+        }
+
+        case 'cipp_list_trusted_blocked_senders': {
+          const { tenantFilter, upn } = args as { tenantFilter: string; upn: string };
+          result = await this.cippService.listTrustedBlockedSenders(tenantFilter, upn);
           break;
         }
 

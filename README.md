@@ -1,6 +1,6 @@
 # CIPP MCP Server
 
-MCP (Model Context Protocol) server for [CIPP](https://github.com/KelvinTegelaar/CIPP) — the CyberDrain Improved Partner Portal. Provides AI assistants with structured access to CIPP's M365 multi-tenant management capabilities.
+MCP (Model Context Protocol) server for [CIPP](https://github.com/CyberDrain/CIPP) — the CyberDrain Improved Partner Portal. Provides AI assistants with structured access to CIPP's M365 multi-tenant management capabilities.
 
 > **This is IT Simply's read-only fork.** 14 write-capable tools present in
 > upstream have been removed. See [IT Simply modifications](#it-simply-modifications)
@@ -8,9 +8,10 @@ MCP (Model Context Protocol) server for [CIPP](https://github.com/KelvinTegelaar
 
 ## Features
 
-- **31 tools** across 12 categories, all read-only
+- **33 tools** across 12 categories, all read-only
 - Tenant, user, group, and mailbox visibility
 - Mailbox and online-archive size reporting, per tenant or per user
+- Per-user Entra ID sign-in logs (status, location, Conditional Access, MFA)
 - Security: Conditional Access policies, named locations
 - Standards & compliance: BPA, domain health, drift detection
 - License reporting (per-tenant and CSP-wide)
@@ -97,9 +98,9 @@ Add to your `claude_desktop_config.json`:
 | Category | Tools |
 |---|---|
 | Tenants | list_tenants, get_tenant_details |
-| Users | list_users, bec_check, list_mfa_users, list_user_devices, list_user_groups |
+| Users | list_users, bec_check, list_mfa_users, list_user_devices, list_user_groups, list_user_signin_logs |
 | Groups | list_groups |
-| Mailboxes | list_mailboxes, list_mailbox_permissions, list_mailbox_usage, get_mailbox_usage |
+| Mailboxes | list_mailboxes, list_mailbox_permissions, list_mailbox_usage, get_mailbox_usage, list_trusted_blocked_senders |
 | Security | list_conditional_access_policies, list_named_locations |
 | Applications | list_enterprise_apps |
 | Standards | list_standards, list_standard_templates, get_tenant_drift, get_tenant_alignment, list_bpa, list_domain_health |
@@ -138,6 +139,27 @@ Two caveats worth knowing:
   decimal places of a gigabyte before returning, so `get_mailbox_usage` byte
   counts are accurate to roughly 10 MB. Quotas are exact — they are recovered
   from the raw `Get-Mailbox` string, which carries the true byte count.
+
+### User sign-in logs
+
+`list_user_signin_logs` returns one user's most recent interactive sign-ins,
+newest first: time, app, IP, location, success or failure with error code and
+reason, client app, Conditional Access status and the policies that evaluated,
+the authentication methods Graph recorded (first factor included — whether
+MFA was required is `authenticationRequirement`), device, and risk when
+flagged — plus a summary of failures, distinct IPs and countries.
+
+- **Accepts a UPN or an object id, and always resolves it first.** CIPP filters
+  Graph on `userId`, which is the Entra object id; a UPN there matches nothing
+  and returns an empty page that reads as "this user never signs in". An
+  unresolvable user is an error, not an empty result.
+- **One tenant, one user, one page.** `top` defaults to 50 and caps at 1000; a
+  full page carries a warning that older sign-ins may exist. `allTenants` is
+  rejected — the endpoint has no all-tenants branch. Tenant-wide sign-ins are
+  CIPP's Sign-Ins report (`ListSignIns`), which this server does not expose.
+- **Needs Entra ID P1/P2 in the tenant.** Graph refuses sign-in log API access
+  otherwise; the tool names the licence gap instead of relaying a generic
+  "Failed to retrieve Sign In report".
 
 ## Authentication Setup
 

@@ -155,6 +155,51 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
       required: ['tenantFilter', 'userId'],
     },
   },
+  {
+    name: 'cipp_list_user_signin_logs',
+    description:
+      "List one user's most recent interactive Entra ID sign-ins, newest first. Each row " +
+      'gives the time, app and resource, IP address, location, success/failure with the ' +
+      'error code and failure reason, client app, Conditional Access status and the ' +
+      'policies that evaluated, authentication requirement (whether MFA was required) and ' +
+      'the authentication methods/steps Graph recorded, first factor included, device, and risk when flagged — plus a summary of failures, ' +
+      'distinct IPs and countries. Answers "why can\'t this user sign in", "was this ' +
+      'account used from somewhere unexpected", and "did MFA/CA apply". Accepts a UPN or ' +
+      'Entra object id; a UPN is resolved to the object id first, because the upstream ' +
+      'filter matches object ids only. One tenant and one user per call. Requires Entra ' +
+      'ID P1/P2 in the tenant. For tenant-wide sign-ins this is the wrong tool — use ' +
+      "CIPP's Sign-Ins report (ListSignIns).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: {
+          type: 'string',
+          description:
+            "Tenant domain name or ID that owns the user. 'allTenants' is not supported — " +
+            'the upstream endpoint reads one tenant.',
+        },
+        userId: {
+          type: 'string',
+          description:
+            "The user's Entra object ID or User Principal Name (e.g. alice@contoso.com).",
+        },
+        top: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 1000,
+          description:
+            'Number of most recent sign-ins to return (default 50, maximum 1000). A result ' +
+            'that fills the limit carries a warning that older sign-ins may exist.',
+        },
+      },
+      required: ['tenantFilter', 'userId'],
+    },
+    annotations: {
+      title: 'List user sign-in logs',
+      readOnlyHint: true,
+      destructiveHint: false,
+    },
+  },
 
   // -------------------------------------------------------------------------
   // Group tools
@@ -209,6 +254,27 @@ export const TOOL_DEFINITIONS: McpToolDefinition[] = [
         },
       },
       required: ['tenantFilter', 'upn'],
+    },
+  },
+  {
+    name: 'cipp_list_trusted_blocked_senders',
+    description:
+      "List a mailbox's safe-sender (trusted) and blocked-sender entries from its Exchange Online junk email settings. Read-only; returns an empty list when the mailbox has none configured, which is normal, not an error.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: TENANT_FILTER_PROP,
+        upn: {
+          type: 'string',
+          description: 'User Principal Name of the mailbox whose safe/blocked sender lists should be read.',
+        },
+      },
+      required: ['tenantFilter', 'upn'],
+    },
+    annotations: {
+      title: 'List trusted and blocked senders',
+      readOnlyHint: true,
+      destructiveHint: false,
     },
   },
   {
@@ -561,6 +627,7 @@ export const TOOL_CATEGORIES: Record<string, string[]> = {
     'cipp_list_mfa_users',
     'cipp_list_user_devices',
     'cipp_list_user_groups',
+    'cipp_list_user_signin_logs',
   ],
   groups: ['cipp_list_groups'],
   mailboxes: [
