@@ -269,6 +269,12 @@ user=<upn>")`.
 The catalogue is projected from CIPP's OpenAPI document at first use and every 6 hours.
 CIPP-API is AGPL-3.0: this repository never contains its `openapi.json` or code.
 
+Graph is reachable only through `cipp_graph_request`, which builds the CIPP call itself from an
+allowlist of read collections (`GRAPH_ALLOWED_PREFIXES` in `src/itsl/policy.ts`, with a denylist of secret terms and
+customer-content segments on top). To let the model read more of Graph, add a prefix there. The read tier is GET-only.
+Every tool result starts with a line marking it as untrusted customer-tenant data; CIPP errors are truncated to 500 characters.
+The S2S v2 string also binds `sha256(x-user-token)`; `x-mcp-user` arrives percent-encoded (non-printable-ASCII and `%`) and is signed as received.
+
 Guard tests (`tests/itsl-*.test.ts`) fail the build if a blocked name is callable,
 a `ReadWrite` endpoint computes to read, a read caller can run a write entry, a
 write tool becomes reachable, or an unsigned/v1-only request is accepted with

@@ -1,7 +1,9 @@
 // IT Simply Ltd: tier computation (new file, not derived from upstream).
 
 import {
+  BLOCKED_NAME_PATTERNS,
   BLOCKED_NAMES,
+  FORCE_DISABLED,
   BLOCKED_ROLE_PATTERNS,
   MUTATION_NAME_PATTERN,
   READ_ROLE_PATTERN,
@@ -16,6 +18,7 @@ export type CallerTier = 'read' | 'write';
 
 const BLOCKED_SET = new Set(BLOCKED_NAMES.map((n) => n.toLowerCase()));
 const WRITE_SET = new Set(WRITE_ALLOWLIST.map((n) => n.toLowerCase()));
+const FORCE_DISABLED_SET = new Set(FORCE_DISABLED.map((n) => n.toLowerCase()));
 const REVIEWED_MAP = new Map(Object.entries(REVIEWED).map(([k, v]) => [k.toLowerCase(), v]));
 
 /**
@@ -32,13 +35,16 @@ const REVIEWED_MAP = new Map(Object.entries(REVIEWED).map(([k, v]) => [k.toLower
  *
  * @param name CIPP endpoint name (path segment after /api/).
  * @param role The operation's x-cipp-role, or undefined if the spec has none.
+ * @param opts.hasGet Whether the endpoint has a GET operation (default true). Read requires it.
  */
-export function computeTier(name: string, role: string | undefined): Tier {
+export function computeTier(name: string, role: string | undefined, opts: { hasGet?: boolean } = {}): Tier {
+  const hasGet = opts.hasGet ?? true;
   const lower = name.toLowerCase();
-  if (BLOCKED_SET.has(lower)) return 'blocked';
+  if (BLOCKED_SET.has(lower) || BLOCKED_NAME_PATTERNS.some((p) => p.test(name))) return 'blocked';
   if (role && BLOCKED_ROLE_PATTERNS.some((p) => p.test(role))) return 'blocked';
+  if (FORCE_DISABLED_SET.has(lower)) return 'disabled';
   if (WRITE_SET.has(lower)) return 'write';
-  if (role && READ_ROLE_PATTERN.test(role) && !MUTATION_NAME_PATTERN.test(name)) return 'read';
+  if (hasGet && role && READ_ROLE_PATTERN.test(role) && !MUTATION_NAME_PATTERN.test(name)) return 'read';
   const reviewed = REVIEWED_MAP.get(lower);
   if (reviewed) return reviewed;
   return 'disabled';

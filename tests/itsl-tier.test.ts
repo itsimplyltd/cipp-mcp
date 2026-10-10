@@ -21,6 +21,14 @@ const MUST_BE_BLOCKED = [
   'ListOpenApiSpec',
   'ListCippDocs',
   'ListExtensionsConfig',
+  // security-review rulings
+  'ListGraphRequest',
+  'ListGraphBulkRequest',
+  'ExecGraphExplorerPreset',
+  'ExecGraphRequestProfile',
+  'ExecListBackup',
+  'ListApiTest',
+  'ListExoRequest',
 ] as const;
 
 const SYNC_TRIGGERS = [
@@ -66,7 +74,7 @@ describe('computeTier rules (first match wins)', () => {
 
   it('read rule: a .Read role on a non-mutating name is read', () => {
     expect(computeTier('ListUsers', 'Identity.User.Read')).toBe('read');
-    expect(computeTier('ExecBECCheck', 'Identity.User.Read')).toBe('read');
+    expect(computeTier('ExecBECCheck', 'Identity.User.Read')).toBe('disabled'); // ruling 3
   });
 
   it('read rule: .ReadWrite is never read', () => {
@@ -133,10 +141,15 @@ describe('projection and tiers over the fixture spec', () => {
   it('gives the expected tier for each rule', () => {
     expect(tier('ListThings')).toBe('read');
     expect(tier('ListPairs')).toBe('read');
-    expect(tier('ListGraphRequest')).toBe('read');
+    expect(tier('ListGraphRequest')).toBe('blocked');
     expect(tier('GetVersion')).toBe('read');
     expect(tier('PublicPing')).toBe('read'); // reviewed
     expect(tier('ListMixed')).toBe('disabled');
+    // read tier is GET-only: a POST-only .Read endpoint is disabled, and so are the named side-effect cases
+    expect(tier('ListPostOnlyRead')).toBe('disabled');
+    expect(tier('ExecBECCheck')).toBe('disabled');
+    expect(tier('ListAuditLogSearches')).toBe('disabled');
+    for (const n of ['ListSomeBackupThing', 'ListRoleBackupOnly']) expect(tier(n)).toBe('blocked');
     expect(tier('ListSneakyReadWrite')).toBe('disabled');
     expect(tier('AddTestReport')).toBe('disabled');
     expect(tier('RemoveThing')).toBe('disabled');
@@ -158,7 +171,9 @@ describe('projection and tiers over the fixture spec', () => {
 
   it('merges GET and POST into one entry: POST method, role is the most restrictive', () => {
     const pair = findEntry(cat, 'ListPairs')!;
-    expect(pair.method).toBe('POST');
+    // a read entry is only ever invoked as GET (ruling 3), even when the path also has a POST
+    expect(pair.method).toBe('GET');
+    expect(pair.hasGet).toBe(true);
     expect(pair.queryParams).toEqual(['AllTenantSelector']);
     expect(Object.keys((pair.inputSchema.properties as object))).toEqual(['AllTenantSelector', 'filter']);
     expect(findEntry(cat, 'ListMixed')!.role).toBe('CIPP.Core.ReadWrite');
@@ -181,9 +196,12 @@ describe('projection and tiers over the fixture spec', () => {
   it('routes POST arguments: declared query params to the query, the rest to the body', () => {
     const e = findEntry(cat, 'ListPairs')!;
     expect(routeArguments(e, { AllTenantSelector: true, filter: 'x' })).toEqual({
-      params: { AllTenantSelector: true },
-      body: { filter: 'x' },
+      params: { AllTenantSelector: true, filter: 'x' },
+      body: undefined,
     });
+    // write entries still split query and body
+    const w = findEntry(cat, 'ExecCIPPDBCache')!;
+    expect(routeArguments(w, { Name: 'n', tenantFilter: 't', extra: 1 })).toEqual({ params: { Name: 'n', tenantFilter: 't' }, body: { extra: 1 } });
     const g = findEntry(cat, 'ListThings')!;
     expect(routeArguments(g, { tenantFilter: 't', userId: 'u' })).toEqual({ params: { tenantFilter: 't', userId: 'u' }, body: undefined });
   });
@@ -210,6 +228,27 @@ describe('projection and tiers over the fixture spec', () => {
   it('skips path keys that are not a bare function name', () => {
     const odd = projectSpec({ paths: { '/api/../Evil': { get: { 'x-cipp-role': 'A.Read' } }, '/api/Ok': { get: { 'x-cipp-role': 'A.Read' } } } });
     expect([...odd.entries.keys()]).toEqual(['ok']);
+  });
+
+  it('rule 3: ListTenants is GET and ClearCache/TriggerRefresh/AsApp never reach CIPP, in any casing', () => {
+    const e = findEntry(cat, 'ListTenants')!;
+    expect(e.tier).toBe('read');
+    expect(e.method).toBe('GET');
+    const out = routeArguments(e, { AllTenantSelector: true, ClearCache: true, clearcache: true, TRIGGERREFRESH: true, AsApp: true });
+    expect(out.params).toEqual({ AllTenantSelector: true });
+    expect(out.body).toBeUndefined();
+  });
+
+  it('rule 4: any *Backup* name or CIPP.Backup.* role is blocked', () => {
+    expect(computeTier('AnythingBackupThing', 'Foo.Read')).toBe('blocked');
+    expect(computeTier('ListWhatever', 'CIPP.Backup.Read')).toBe('blocked');
+    expect(computeTier('ListWhatever', 'CIPP.Backup.ReadWrite')).toBe('blocked');
+  });
+
+  it('rule 3: computeTier needs a GET operation for read', () => {
+    expect(computeTier('ListX', 'A.Read', { hasGet: false })).toBe('disabled');
+    expect(computeTier('ListX', 'A.Read', { hasGet: true })).toBe('read');
+    expect(computeTier('ExecCIPPDBCache', 'A.ReadWrite', { hasGet: false })).toBe('write');
   });
 });
 
@@ -271,5 +310,25 @@ describe('CatalogueStore', () => {
       { name: 'ListBrandNew', role: 'Foo.Read', tier: 'read' },
       { name: 'ExecBrandNew', role: 'Foo.ReadWrite', tier: 'disabled' },
     ]);
+  });
+
+  it('rule 8: an endpoint whose tier differs from the previous load is logged', async () => {
+    let now = 1_000;
+    const warn = jest.fn();
+    const store = new CatalogueStore(1000, () => now);
+    const log = { ...logger, warn };
+    await store.get([good], log);
+    expect(warn).not.toHaveBeenCalled();
+    now += 5000;
+    const drifted = JSON.parse(JSON.stringify(fixture));
+    drifted.paths['/api/ListThings'].get['x-cipp-role'] = 'Identity.User.ReadWrite';
+    await store.get([{ name: 'g', fetch: async () => drifted }], log);
+    expect(warn).toHaveBeenCalledWith('CIPP endpoint tier changed', {
+      name: 'ListThings',
+      from: 'read',
+      to: 'disabled',
+      role: 'Identity.User.ReadWrite',
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

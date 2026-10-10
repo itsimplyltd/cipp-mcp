@@ -582,6 +582,188 @@
         "x-cipp-role": "Public",
         "parameters": []
       }
+    },
+    "/api/ListTenants": {
+      "get": {
+        "summary": "List tenants (get)",
+        "operationId": "List tenants (get)",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "List tenants (get)",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": [
+          {
+            "name": "ClearCache",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "TriggerRefresh",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "AllTenantSelector",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "List tenants",
+        "operationId": "List tenants",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "List tenants",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": [
+          {
+            "name": "AllTenantSelector",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ]
+      }
+    },
+    "/api/ListPostOnlyRead": {
+      "post": {
+        "summary": "Post-only read",
+        "operationId": "Post-only read",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Post-only read",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecBECCheck": {
+      "post": {
+        "summary": "BEC check",
+        "operationId": "BEC check",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "BEC check",
+        "x-cipp-role": "Identity.User.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListAuditLogSearches": {
+      "get": {
+        "summary": "Audit log searches",
+        "operationId": "Audit log searches",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Audit log searches",
+        "x-cipp-role": "Tenant.Alert.Read",
+        "parameters": []
+      },
+      "post": {
+        "summary": "Audit log searches (post)",
+        "operationId": "Audit log searches (post)",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Audit log searches (post)",
+        "x-cipp-role": "Tenant.Alert.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecListBackup": {
+      "get": {
+        "summary": "ExecListBackup",
+        "operationId": "ExecListBackup",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecListBackup",
+        "x-cipp-role": "CIPP.Backup.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListApiTest": {
+      "get": {
+        "summary": "ListApiTest",
+        "operationId": "ListApiTest",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListApiTest",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListExoRequest": {
+      "get": {
+        "summary": "ListExoRequest",
+        "operationId": "ListExoRequest",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListExoRequest",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecGraphExplorerPreset": {
+      "get": {
+        "summary": "ExecGraphExplorerPreset",
+        "operationId": "ExecGraphExplorerPreset",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecGraphExplorerPreset",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecGraphRequestProfile": {
+      "get": {
+        "summary": "ExecGraphRequestProfile",
+        "operationId": "ExecGraphRequestProfile",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecGraphRequestProfile",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListSomeBackupThing": {
+      "get": {
+        "summary": "ListSomeBackupThing",
+        "operationId": "ListSomeBackupThing",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListSomeBackupThing",
+        "x-cipp-role": "Tenant.Directory.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListRoleBackupOnly": {
+      "get": {
+        "summary": "ListRoleBackupOnly",
+        "operationId": "ListRoleBackupOnly",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListRoleBackupOnly",
+        "x-cipp-role": "CIPP.Backup.Read",
+        "parameters": []
+      }
     }
   }
 }

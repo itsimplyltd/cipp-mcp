@@ -16,6 +16,8 @@ export interface CatalogueEntry {
   /** Method used to call the endpoint: POST when the path has both. */
   method: 'GET' | 'POST';
   role: string | undefined;
+  /** The path has a GET operation (read tier requires it; read entries are always invoked as GET). */
+  hasGet: boolean;
   tier: Tier;
   inputSchema: Record<string, unknown>;
   /** Names of query-string parameters (for POST, the rest of the arguments go in the body). */
@@ -99,7 +101,6 @@ export function projectSpec(rawSpec: unknown, source = 'unknown', now = Date.now
     const post = isObj(pathItem['post']) ? pathItem['post'] : undefined;
     const op = post ?? get; // a GET/POST pair is one entry; the POST carries the body
     if (!op) continue;
-    const method: 'GET' | 'POST' = post ? 'POST' : 'GET';
 
     // The role is the most restrictive across the methods present: if either
     // operation is not `.Read`, the whole path is not read.
@@ -152,6 +153,9 @@ export function projectSpec(rawSpec: unknown, source = 'unknown', now = Date.now
       }
     }
 
+    const tier = computeTier(name, role, { hasGet: get !== undefined });
+    // A read entry is only ever invoked as GET; everything else keeps the POST/GET it has.
+    const method: 'GET' | 'POST' = tier === 'read' || !post ? 'GET' : 'POST';
     const tags = Array.isArray(op['tags']) ? op['tags'] : [];
     entries.set(name.toLowerCase(), {
       name,
@@ -160,7 +164,8 @@ export function projectSpec(rawSpec: unknown, source = 'unknown', now = Date.now
       description: typeof op['description'] === 'string' ? op['description'] : '',
       method,
       role,
-      tier: computeTier(name, role),
+      hasGet: get !== undefined,
+      tier,
       inputSchema: {
         type: 'object',
         properties,
@@ -311,8 +316,10 @@ export class CatalogueStore {
       try {
         const cat = projectSpec(await f.fetch(), f.name, this.clock());
         if (cat.entries.size === 0) throw new Error('spec contained no usable paths');
+        const prev = this.current;
         this.current = cat;
         this.logNew(cat, logger);
+        this.logTierDrift(prev, cat, logger);
         return cat;
       } catch (err) {
         failures.push(`${f.name}: ${errMsg(err)}`);
@@ -322,6 +329,17 @@ export class CatalogueStore {
     throw new Error(
       `The CIPP endpoint catalogue is unavailable (every spec source failed: ${failures.join('; ')}). Named cipp_* tools still work.`
     );
+  }
+
+  /** Rule 8: any endpoint whose computed tier differs from the previous load is logged once. */
+  private logTierDrift(prev: Catalogue | undefined, cat: Catalogue, logger: CatalogueLogger): void {
+    if (!prev) return;
+    for (const [key, e] of cat.entries) {
+      const before = prev.entries.get(key);
+      if (before && before.tier !== e.tier) {
+        logger.warn('CIPP endpoint tier changed', { name: e.name, from: before.tier, to: e.tier, role: e.role });
+      }
+    }
   }
 
   /** Decision 5: each endpoint new to this process is logged once, with its tier. */
@@ -411,6 +429,30 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
 // Exec argument routing
 // ---------------------------------------------------------------------------
 
+/** Query parameters that make a GET change state or widen privilege; never forwarded on a read GET. */
+const STRIPPED_ON_READ = new Set(['clearcache', 'triggerrefresh', 'asapp', 'queuenameoverride']);
+
+/**
+ * Canonicalise argument keys to the declared spelling and reject duplicates that
+ * differ only by case (CIPP reads query keys case-insensitively, first wins).
+ */
+export function canonicaliseArguments(
+  entry: CatalogueEntry,
+  args: Record<string, unknown>
+): { ok: true; args: Record<string, unknown> } | { ok: false; reason: string } {
+  const declared = new Map<string, string>();
+  for (const k of Object.keys((entry.inputSchema['properties'] as Json) ?? {})) declared.set(k.toLowerCase(), k);
+  const seen = new Set<string>();
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    const lk = k.toLowerCase();
+    if (seen.has(lk)) return { ok: false, reason: `duplicate argument '${k}' (keys are compared case-insensitively).` };
+    seen.add(lk);
+    out[declared.get(lk) ?? k] = v;
+  }
+  return { ok: true, args: out };
+}
+
 /** Split `exec` arguments into query and body for the entry's method. */
 export function routeArguments(
   entry: CatalogueEntry,
@@ -419,7 +461,11 @@ export function routeArguments(
   const asQuery = (v: unknown): unknown => (v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
   const params: Record<string, unknown> = {};
   if (entry.method === 'GET') {
-    for (const [k, v] of Object.entries(args)) params[k] = asQuery(v);
+    const strip = entry.tier === 'read';
+    for (const [k, v] of Object.entries(args)) {
+      if (strip && STRIPPED_ON_READ.has(k.toLowerCase())) continue;
+      params[k] = asQuery(v);
+    }
     return { params, body: undefined };
   }
   if (entry.bodyIsArray && Array.isArray(args['body'])) {

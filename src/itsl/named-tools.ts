@@ -34,7 +34,10 @@ export const NAMED_TOOL_ENDPOINTS: Readonly<Record<string, readonly string[]>> =
   cipp_set_email_forwarding: ['ExecEmailForward'],
   cipp_list_conditional_access_policies: ['ListConditionalAccessPolicies'],
   cipp_list_named_locations: ['ListNamedLocations'],
-  cipp_list_enterprise_apps: ['ListGraphRequest'],
+  // Fixed GET of /servicePrincipals built inside CippService. 'ListGraphRequest' itself is BLOCKED
+  // for the catalogue; this virtual key (text after '#' is ignored when matching service calls)
+  // lets the one hard-coded named use keep its read tier.
+  cipp_list_enterprise_apps: ['ListGraphRequest#servicePrincipals'],
   cipp_list_standards: ['ListStandards'],
   cipp_run_standards_check: ['ExecStandardsRun'],
   cipp_list_standard_templates: ['listStandardTemplates'],
@@ -90,7 +93,7 @@ export const KNOWN_ENDPOINT_ROLES: Readonly<Record<string, string | undefined>> 
   ExecEmailForward: 'Exchange.Mailbox.ReadWrite',
   ListConditionalAccessPolicies: 'Tenant.ConditionalAccess.Read',
   ListNamedLocations: 'Tenant.ConditionalAccess.Read',
-  ListGraphRequest: 'CIPP.Core.Read',
+  'ListGraphRequest#servicePrincipals': 'CIPP.Core.Read',
   ListStandards: 'Tenant.Standards.Read',
   ExecStandardsRun: 'Tenant.Standards.ReadWrite',
   listStandardTemplates: 'Tenant.Standards.Read',
@@ -114,8 +117,17 @@ export const KNOWN_ENDPOINT_ROLES: Readonly<Record<string, string | undefined>> 
   ListLogs: 'CIPP.Logs.Read',
 };
 
+/**
+ * Endpoints a named tool calls with POST (or that the spec only offers as POST).
+ * RULING (security review): the read tier is GET-only, so these compute to disabled
+ * pending review: cipp_bec_check (ExecBECCheck starts investigations) and
+ * cipp_list_scheduled_items (WYRE POSTs to ListScheduledItems; not shown read-only).
+ * cipp_list_tenants is NOT here: it calls GET and never sends ClearCache.
+ */
+export const POST_INVOKED_ENDPOINTS: ReadonlySet<string> = new Set(['ExecBECCheck', 'ListScheduledItems']);
+
 /** Looks up the live spec's role for an endpoint; undefined when the spec is not loaded or lacks it. */
-export type RoleLookup = (endpoint: string) => { found: boolean; role: string | undefined };
+export type RoleLookup = (endpoint: string) => { found: boolean; role: string | undefined; hasGet: boolean };
 
 /**
  * Tier of a named tool: the most restrictive tier across every endpoint it
@@ -127,9 +139,10 @@ export type RoleLookup = (endpoint: string) => { found: boolean; role: string | 
  * built-in role table and (when loaded) the live spec, both via computeTier.
  */
 export function endpointTier(endpoint: string, liveRole?: RoleLookup): Tier {
-  const tiers: Tier[] = [computeTier(endpoint, KNOWN_ENDPOINT_ROLES[endpoint])];
+  const postOnly = POST_INVOKED_ENDPOINTS.has(endpoint);
+  const tiers: Tier[] = [computeTier(endpoint, KNOWN_ENDPOINT_ROLES[endpoint], { hasGet: !postOnly })];
   const live = liveRole?.(endpoint);
-  if (live?.found) tiers.push(computeTier(endpoint, live.role));
+  if (live?.found) tiers.push(computeTier(endpoint, live.role, { hasGet: live.hasGet && !postOnly }));
   return mostRestrictive(tiers);
 }
 

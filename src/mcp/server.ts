@@ -17,7 +17,7 @@ import { McpServerConfig } from '../types/index.js';
 import { EnvironmentConfig, parseCredentialsFromHeaders } from '../utils/config.js';
 import { CippToolHandler } from '../handlers/tool.handler.js';
 import { verifyS2sHeader, S2S_HEADER } from '../s2s-verify.js';
-import { decideS2s, TIER_HEADER, USER_HEADER } from '../itsl/s2s-v2.js';
+import { decideS2s, TIER_HEADER, TOKEN_HEADER, USER_HEADER } from '../itsl/s2s-v2.js';
 import { ToolContext } from '../itsl/meta-tools.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
@@ -210,6 +210,7 @@ Tool categories:
           requireV2: envFlag('ITSL_REQUIRE_S2S_V2'),
           tierHeader: headerValue(req.headers[TIER_HEADER]),
           userHeader: headerValue(req.headers[USER_HEADER]),
+          tokenHeader: headerValue(req.headers[TOKEN_HEADER]),
           verifyV1: verifyS2sHeader,
         });
         if (!s2s.ok) {

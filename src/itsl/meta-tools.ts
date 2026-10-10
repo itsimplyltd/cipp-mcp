@@ -11,13 +11,14 @@ import {
   CatalogueStore,
   catalogueStore,
   defaultSpecFetchers,
+  canonicaliseArguments,
   findEntry,
   routeArguments,
   searchEntries,
   SpecApi,
   SpecFetcher,
 } from './catalogue.js';
-import { GRAPH_BLOCKED_ENDPOINTS } from './policy.js';
+import { buildGraphRequest } from './graph.js';
 import { endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
 import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
 
@@ -58,7 +59,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
         offset: { type: 'number', description: 'Skip this many results (paging).' },
       },
     },
-    annotations: { title: 'Search CIPP endpoint catalogue', readOnlyHint: true },
+    annotations: { title: 'Search CIPP endpoint catalogue', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: 'cipp_get_tool_info',
@@ -75,7 +76,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
       },
       required: ['names'],
     },
-    annotations: { title: 'Get CIPP endpoint schema', readOnlyHint: true },
+    annotations: { title: 'Get CIPP endpoint schema', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
     name: 'cipp_exec_tool',
@@ -89,12 +90,12 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
       },
       required: ['name'],
     },
-    annotations: { title: 'Run a CIPP endpoint', readOnlyHint: false, destructiveHint: false },
+    annotations: { title: 'Run a CIPP endpoint', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
     name: 'cipp_graph_request',
     description:
-      "Run a read-only Microsoft Graph GET against a tenant through CIPP (ListGraphRequest). Provide the tenant and the Graph path, plus optional OData options ($select, $filter, $top, ...). Paths that expose secrets (BitLocker keys, LAPS passwords, temporary access passes) are refused.",
+      "Run a read-only Microsoft Graph GET against a tenant through CIPP (ListGraphRequest). Provide the tenant and a Graph path under an allowed collection (users, groups, devices, servicePrincipals, applications, domains, organization, subscribedSkus, directoryRoles, roleManagement/directory, identity/conditionalAccess, policies, auditLogs, reports, security/alerts_v2, security/incidents, deviceManagement/managedDevices|deviceCompliancePolicies|deviceConfigurations, teams, sites), plus optional $select, $filter, $top, $expand. Functions, actions, secrets and authentication methods are refused.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,7 +112,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
       },
       required: ['tenantFilter', 'endpoint'],
     },
-    annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true },
+    annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
 ];
 
@@ -125,7 +126,7 @@ export function liveRoleLookup(store: CatalogueStore = catalogueStore): RoleLook
   if (!cat) return undefined;
   return (endpoint) => {
     const e = findEntry(cat, endpoint);
-    return e ? { found: true, role: e.role } : { found: false, role: undefined };
+    return e ? { found: true, role: e.role, hasGet: e.hasGet } : { found: false, role: undefined, hasGet: false };
   };
 }
 
@@ -163,17 +164,6 @@ const text = (value: unknown, isError = false): MetaResult => ({
 async function loadCatalogue(deps: MetaDeps): Promise<Catalogue> {
   const store = deps.store ?? catalogueStore;
   return store.get(deps.fetchers ?? defaultSpecFetchers(deps.service), deps.logger);
-}
-
-function graphEndpointBlocked(endpoint: unknown): boolean {
-  if (typeof endpoint !== 'string') return false;
-  let decoded = endpoint;
-  try {
-    decoded = decodeURIComponent(endpoint);
-  } catch {
-    // keep the raw string; the patterns still run on it
-  }
-  return GRAPH_BLOCKED_ENDPOINTS.some((p) => p.test(decoded) || p.test(endpoint));
 }
 
 /** Refusal logging: tool, target, tier, user. Never arguments, never tokens. */
@@ -248,16 +238,14 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
         return text(`'${target}' is not an endpoint in this server's CIPP catalogue. Use cipp_search_tools to find endpoint names.`, true);
       }
       // Recompute from role and name rather than trusting a stored field.
-      const tier = computeTier(entry.name, entry.role);
+      const tier = computeTier(entry.name, entry.role, { hasGet: entry.hasGet });
       if (!isCallable(tier, deps.ctx.tier)) {
         logRefusal(deps, name, entry.name, tier);
         return text(refusalReason(entry.name, tier, deps.ctx.tier), true);
       }
-      const finalArgs = (callArgs ?? {}) as Record<string, unknown>;
-      if (entry.name.toLowerCase() === 'listgraphrequest' && graphEndpointBlocked(finalArgs['Endpoint'] ?? finalArgs['endpoint'])) {
-        logRefusal(deps, name, `${entry.name}(graph path)`, 'blocked');
-        return text(`Refused: that Graph path exposes secrets and is blocked by IT Simply policy.`, true);
-      }
+      const canon = canonicaliseArguments(entry, (callArgs ?? {}) as Record<string, unknown>);
+      if (!canon.ok) return text(`Refused: ${canon.reason}`, true);
+      const finalArgs = canon.args;
       const { params, body } = routeArguments(entry, finalArgs);
       deps.logger.info('CIPP exec', { target: entry.name, tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
       const result = await deps.service.callEndpoint(entry.method, entry.name, params, body);
@@ -265,23 +253,18 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
     }
 
     case 'cipp_graph_request': {
-      const effective = endpointTier('ListGraphRequest', liveRoleLookup(deps.store ?? catalogueStore));
+      const effective = endpointTier('ListGraphRequest#servicePrincipals', liveRoleLookup(deps.store ?? catalogueStore));
       if (!isCallable(effective, deps.ctx.tier)) {
-        logRefusal(deps, name, 'ListGraphRequest', effective);
+        logRefusal(deps, name, 'cipp_graph_request', effective);
         return text(refusalReason('cipp_graph_request', effective, deps.ctx.tier), true);
       }
-      const endpoint = args['endpoint'] ?? args['Endpoint'];
-      if (typeof endpoint !== 'string' || typeof args['tenantFilter'] !== 'string') {
-        return text("Provide 'tenantFilter' and 'endpoint'.", true);
+      const built = buildGraphRequest(args);
+      if (!built.ok) {
+        logRefusal(deps, name, 'graph request', 'blocked');
+        return text(`Refused: ${built.reason}`, true);
       }
-      if (graphEndpointBlocked(endpoint)) {
-        logRefusal(deps, name, 'ListGraphRequest(graph path)', 'blocked');
-        return text('Refused: that Graph path exposes secrets and is blocked by IT Simply policy.', true);
-      }
-      const ALLOWED = ['tenantFilter', '$select', '$filter', '$top', '$expand', '$orderby', '$search', '$count', 'Version'];
-      const params: Record<string, unknown> = { Endpoint: endpoint };
-      for (const k of ALLOWED) if (args[k] !== undefined) params[k] = args[k];
-      return text(await deps.service.callEndpoint('GET', 'ListGraphRequest', params));
+      deps.logger.info('CIPP graph read', { path: built.params['Endpoint'], tier: deps.ctx.tier, user: deps.ctx.user });
+      return text(await deps.service.callEndpoint('GET', 'ListGraphRequest', built.params));
     }
 
     default:

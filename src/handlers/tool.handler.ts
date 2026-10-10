@@ -4,6 +4,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { frameResult, truncateError, tenantOf } from '../itsl/frame.js';
 import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
 import { TOOL_DEFINITIONS } from '../mcp/tool.definitions.js';
@@ -44,12 +45,47 @@ export class CippToolHandler {
 
   /** Tools this caller may run: named tools filtered by tier, plus the catalogue meta-tools. */
   getToolDefinitions() {
-    const named = TOOL_DEFINITIONS.filter((t) => namedToolDecision(t.name, this.context)?.allowed === true);
+    const named = TOOL_DEFINITIONS.flatMap((t) => {
+      const d = namedToolDecision(t.name, this.context);
+      if (d?.allowed !== true) return [];
+      // Annotations reflect effective behaviour (tier), not upstream's guesses, so clients prompt correctly.
+      const readOnly = d.tier === 'read';
+      return [
+        {
+          ...t,
+          annotations: {
+            ...(t.annotations ?? {}),
+            title: t.annotations?.title ?? t.name,
+            readOnlyHint: readOnly,
+            destructiveHint: false,
+            idempotentHint: readOnly,
+            openWorldHint: true,
+          },
+        },
+      ];
+    });
     return [...named, ...META_TOOL_DEFINITIONS];
   }
 
+  /**
+   * Every result is framed as untrusted tenant data, and an error from CIPP is
+   * echoed truncated to 500 characters (also framed). Unknown tools still throw.
+   */
   async handleToolCall(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
-    this.logger.debug(`Dispatching tool call: ${name}`, { args });
+    let result: McpToolResult;
+    try {
+      result = await this.dispatch(name, args);
+    } catch (error) {
+      if (error instanceof McpError && error.code === ErrorCode.MethodNotFound) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      result = { content: [{ type: 'text', text: truncateError(message) }], isError: true };
+    }
+    return frameResult(result, tenantOf(args));
+  }
+
+  private async dispatch(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
+    // Argument VALUES are never logged before the gate (they can hold passwords); after it, keys only.
+    this.logger.debug(`Dispatching tool call: ${name}`);
 
     // IT Simply tier gate. This is the single path every tool call takes, so
     // nothing below (the switch) can run for a tool the caller's tier forbids.
@@ -74,6 +110,8 @@ export class CippToolHandler {
       });
       return { content: [{ type: 'text', text: decision.reason }], isError: true };
     }
+
+    this.logger.debug(`Tool call passed the tier gate: ${name}`, { argumentKeys: Object.keys(args) });
 
     try {
       let result: unknown;

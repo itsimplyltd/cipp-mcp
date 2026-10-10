@@ -1,73 +1,115 @@
-// S2S v2 (signed tier and user), the per-user token mode, and the tier that
-// reaches tools/list, tested at the HTTP boundary of the real server.
+// S2S v2 (signed tier, user and token hash), the per-user token mode, and the
+// tier that reaches tools/list, tested at the HTTP boundary of the real server.
 
 import { createHmac } from 'node:crypto';
 import fixture from './fixtures/openapi-fixture.json';
-import { decideS2s, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';
+import { decideS2s, encodeMcpUser, sha256Hex, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';
 import { verifyS2sHeader } from '../src/s2s-verify.js';
 import { parseCredentialsFromHeaders } from '../src/utils/config.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
 
 const SECRET = 'test-v2-secret-do-not-use-in-prod';
+const TOK = 'user-jwt-value';
 const nowS = () => Math.floor(Date.now() / 1000);
 const v1 = (secret: string, t: number) => `t=${t},v1=${createHmac('sha256', secret).update(`t=${t}`).digest('hex')}`;
+const sign = (tier: 'read' | 'write', user: string, t = nowS(), tok = TOK, secret = SECRET) =>
+  signS2sV2(secret, tier, user, tok, t);
+
+describe('independent test vectors (computed with openssl, identical to the gateway tests in cred-router/test/cippRoute.test.js)', () => {
+  // H=$(printf 'tok-value' | openssl dgst -sha256 -hex)   -> 7401b60ed785119d22eaa47b8545fdbe9e838dbbbafc29a981bc35283b73463f
+  // printf "t=1700000000\ntier=read\nuser=grant@itsimply.co.nz\ntok=$H" | openssl dgst -sha256 -hmac test-secret
+  const T = 1700000000;
+  const READ_ASCII = 't=1700000000,v2=ea74a812c2749d3d04cf4943f8e115dc4640f24f07def2ce58e8c487f0fa38fe';
+  const WRITE_ASCII = 't=1700000000,v2=462d9089b1c78c1fe87b8659f42d4e25800f6c6ebd9e2ec998f23e6dc6ae48cc';
+  // user=jos%C3%A9@itsimply.co.nz (UPN josé@itsimply.co.nz, '@' stays raw)
+  const READ_UTF8 = 't=1700000000,v2=54e857bccadab805fc567375b9ea1c0b950a6559f29028850677f702fae12753';
+  const now = { nowSeconds: T };
+
+  it('the token hash is sha256 lower-hex of x-user-token', () => {
+    expect(sha256Hex('tok-value')).toBe('7401b60ed785119d22eaa47b8545fdbe9e838dbbbafc29a981bc35283b73463f');
+  });
+
+  it('signs the vectors byte-for-byte', () => {
+    expect(signS2sV2('test-secret', 'read', 'grant@itsimply.co.nz', 'tok-value', T)).toBe(READ_ASCII);
+    expect(signS2sV2('test-secret', 'write', 'grant@itsimply.co.nz', 'tok-value', T)).toBe(WRITE_ASCII);
+    expect(encodeMcpUser('josé@itsimply.co.nz')).toBe('jos%C3%A9@itsimply.co.nz');
+    expect(signS2sV2('test-secret', 'read', 'jos%C3%A9@itsimply.co.nz', 'tok-value', T)).toBe(READ_UTF8);
+  });
+
+  it('verifies the vectors, and decodes the UTF-8 user only after verifying the raw header', () => {
+    expect(verifyS2sV2(READ_ASCII, 'test-secret', 'read', 'grant@itsimply.co.nz', 'tok-value', now)).toEqual({ tier: 'read', user: 'grant@itsimply.co.nz' });
+    expect(verifyS2sV2(WRITE_ASCII, 'test-secret', 'write', 'grant@itsimply.co.nz', 'tok-value', now)?.tier).toBe('write');
+    expect(verifyS2sV2(READ_UTF8, 'test-secret', 'read', 'jos%C3%A9@itsimply.co.nz', 'tok-value', now)).toEqual({ tier: 'read', user: 'josé@itsimply.co.nz' });
+    // the decoded form was NOT what was signed
+    expect(verifyS2sV2(READ_UTF8, 'test-secret', 'read', 'josé@itsimply.co.nz', 'tok-value', now)).toBeUndefined();
+  });
+
+  it('a different token, tier or user breaks the signature', () => {
+    expect(verifyS2sV2(READ_ASCII, 'test-secret', 'read', 'grant@itsimply.co.nz', 'another-token', now)).toBeUndefined();
+    expect(verifyS2sV2(READ_ASCII, 'test-secret', 'write', 'grant@itsimply.co.nz', 'tok-value', now)).toBeUndefined();
+    expect(verifyS2sV2(READ_ASCII, 'test-secret', 'read', 'eve@itsimply.co.nz', 'tok-value', now)).toBeUndefined();
+  });
+});
 
 describe('verifyS2sV2', () => {
-  it('accepts a header over exactly (t, tier, user)', () => {
-    const h = signS2sV2(SECRET, 'write', 'grant@example.com', nowS());
-    expect(verifyS2sV2(h, SECRET, 'write', 'grant@example.com')).toEqual({ tier: 'write', user: 'grant@example.com' });
-  });
-
-  it('format is t=<unix>,v2=<hex> over "t=<unix>\\ntier=<tier>\\nuser=<upn>"', () => {
-    const t = nowS();
-    const hex = createHmac('sha256', SECRET).update(`t=${t}\ntier=read\nuser=a@b.c`).digest('hex');
-    expect(signS2sV2(SECRET, 'read', 'a@b.c', t)).toBe(`t=${t},v2=${hex}`);
-  });
-
-  it('a forged tier or user fails: the signature binds them', () => {
-    const h = signS2sV2(SECRET, 'read', 'reader@example.com', nowS());
-    expect(verifyS2sV2(h, SECRET, 'write', 'reader@example.com')).toBeUndefined();
-    expect(verifyS2sV2(h, SECRET, 'read', 'admin@example.com')).toBeUndefined();
-  });
-
   it('rejects wrong secret, stale or future timestamp, bad tier values, missing headers, v1 headers', () => {
-    expect(verifyS2sV2(signS2sV2('other', 'read', 'u', nowS()), SECRET, 'read', 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS() - 301), SECRET, 'read', 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS() + 301), SECRET, 'read', 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS() - 299), SECRET, 'read', 'u')).toBeDefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS()), SECRET, 'admin', 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS()), SECRET, undefined, 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS()), SECRET, 'read', undefined)).toBeUndefined();
-    expect(verifyS2sV2(v1(SECRET, nowS()), SECRET, 'read', 'u')).toBeUndefined();
-    expect(verifyS2sV2(signS2sV2(SECRET, 'read', 'u', nowS()), '', 'read', 'u')).toBeUndefined();
+    const u = 'u@example.com';
+    expect(verifyS2sV2(sign('read', u), SECRET, 'read', u, TOK)).toBeDefined();
+    expect(verifyS2sV2(sign('read', u, nowS(), TOK, 'other'), SECRET, 'read', u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u, nowS() - 301), SECRET, 'read', u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u, nowS() + 301), SECRET, 'read', u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u, nowS() - 299), SECRET, 'read', u, TOK)).toBeDefined();
+    expect(verifyS2sV2(sign('read', u), SECRET, 'admin', u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u), SECRET, undefined, u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u), SECRET, 'read', undefined, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u), SECRET, 'read', u, undefined)).toBeUndefined(); // no token: cannot bind
+    expect(verifyS2sV2(v1(SECRET, nowS()), SECRET, 'read', u, TOK)).toBeUndefined();
+    expect(verifyS2sV2(sign('read', u), '', 'read', u, TOK)).toBeUndefined();
   });
 
-  it('rejects a user containing a newline (delimiter injection)', () => {
-    const t = nowS();
-    // Sign "tier=read\nuser=x\ntier=write" style content: must not verify as (write, ...).
-    const user = 'x\ntier=write';
-    const h = signS2sV2(SECRET, 'read', user, t);
-    expect(verifyS2sV2(h, SECRET, 'read', user)).toBeUndefined();
+  it('rule 7: replaying a signed request with a different x-user-token fails', () => {
+    const h = sign('write', 'grant@example.com');
+    expect(verifyS2sV2(h, SECRET, 'write', 'grant@example.com', TOK)).toBeDefined();
+    expect(verifyS2sV2(h, SECRET, 'write', 'grant@example.com', 'attacker-token')).toBeUndefined();
+  });
+
+  it('rule 6: raw non-ASCII, control or Latin-1 bytes in x-mcp-user are refused without throwing', () => {
+    for (const bad of ['josé@x.nz', 'a\nb@x.nz', 'a b@x.nz', 'a\tb', 'ÿ', '林@x.nz', 'a\u007f']) {
+      expect(() => verifyS2sV2(sign('read', bad), SECRET, 'read', bad, TOK)).not.toThrow();
+      expect(verifyS2sV2(sign('read', bad), SECRET, 'read', bad, TOK)).toBeUndefined();
+    }
+  });
+
+  it('rejects malformed percent-encoding even when correctly signed', () => {
+    const bad = 'jos%C3@x.nz';
+    expect(verifyS2sV2(sign('read', bad), SECRET, 'read', bad, TOK)).toBeUndefined();
+  });
+
+  it('encodeMcpUser: printable ASCII stays (including @), % and non-ASCII are encoded over UTF-8', () => {
+    expect(encodeMcpUser('a.b-c_d@x.nz')).toBe('a.b-c_d@x.nz');
+    expect(encodeMcpUser('100%')).toBe('100%25');
+    expect(encodeMcpUser('林@x.nz')).toBe('%E6%9E%97@x.nz');
+    expect(encodeMcpUser('a b')).toBe('a%20b');
   });
 });
 
 describe('decideS2s', () => {
-  const base = { tierHeader: 'write', userHeader: 'u@example.com', verifyV1: verifyS2sHeader };
+  const base = { tierHeader: 'write', userHeader: 'u@example.com', tokenHeader: TOK, verifyV1: verifyS2sHeader };
 
   it('requireV2: unsigned, v1-only, forged and secretless requests are refused', () => {
     const t = nowS();
+    const u = 'u@example.com';
     expect(decideS2s({ ...base, header: undefined, secret: SECRET, requireV2: true }).ok).toBe(false);
     expect(decideS2s({ ...base, header: v1(SECRET, t), secret: SECRET, requireV2: true }).ok).toBe(false);
-    // forged x-mcp-tier with a VALID v1 signature
-    expect(decideS2s({ ...base, tierHeader: 'write', header: v1(SECRET, t), secret: SECRET, requireV2: true }).ok).toBe(false);
-    expect(decideS2s({ ...base, header: signS2sV2(SECRET, 'read', 'u@example.com', t), secret: SECRET, requireV2: true }).ok).toBe(false); // tier header says write
-    expect(decideS2s({ ...base, header: signS2sV2(SECRET, 'write', 'u@example.com', t), secret: '', requireV2: true }).ok).toBe(false);
+    expect(decideS2s({ ...base, header: sign('read', u), secret: SECRET, requireV2: true }).ok).toBe(false); // tier header says write
+    expect(decideS2s({ ...base, header: sign('write', u), secret: '', requireV2: true }).ok).toBe(false);
     expect(decideS2s({ ...base, header: 'garbage', secret: SECRET, requireV2: true }).ok).toBe(false);
+    expect(decideS2s({ ...base, tokenHeader: 'other', header: sign('write', u), secret: SECRET, requireV2: true }).ok).toBe(false);
   });
 
-  it('requireV2: a valid v2 passes and yields the signed tier and user', () => {
-    const out = decideS2s({ ...base, header: signS2sV2(SECRET, 'write', 'u@example.com', nowS()), secret: SECRET, requireV2: true });
-    expect(out).toEqual({ ok: true, tier: 'write', user: 'u@example.com', version: 'v2' });
+  it('requireV2: a valid v2 passes and yields the signed tier and decoded user', () => {
+    const out = decideS2s({ ...base, userHeader: 'jos%C3%A9@x.nz', header: sign('write', 'jos%C3%A9@x.nz'), secret: SECRET, requireV2: true });
+    expect(out).toEqual({ ok: true, tier: 'write', user: 'josé@x.nz', version: 'v2' });
   });
 
   it('v2 not required: v1 still verifies but a forged tier header is NOT trusted (tier read)', () => {
@@ -76,8 +118,7 @@ describe('decideS2s', () => {
   });
 
   it('v2 not required and no secret (local dev): allowed, tier read', () => {
-    const out = decideS2s({ ...base, header: undefined, secret: '', requireV2: false });
-    expect(out).toEqual({ ok: true, tier: 'read', user: undefined, version: 'none' });
+    expect(decideS2s({ ...base, header: undefined, secret: '', requireV2: false })).toEqual({ ok: true, tier: 'read', user: undefined, version: 'none' });
   });
 });
 
@@ -135,13 +176,16 @@ describe('server HTTP boundary', () => {
     params: { name, arguments: args },
     id: 2,
   });
-  const v2 = (tier: 'read' | 'write', user = 'u@example.com') => ({
-    'x-gateway-s2s': signS2sV2(SECRET, tier, user, nowS()),
-    'x-mcp-tier': tier,
-    'x-mcp-user': user,
-    'x-user-token': TOKEN,
-    'x-base-url': 'https://cipp.example',
-  });
+  const v2 = (tier: 'read' | 'write', upn = 'u@example.com') => {
+    const user = encodeMcpUser(upn);
+    return {
+      'x-gateway-s2s': sign(tier, user, nowS(), TOKEN),
+      'x-mcp-tier': tier,
+      'x-mcp-user': user,
+      'x-user-token': TOKEN,
+      'x-base-url': 'https://cipp.example',
+    };
+  };
   const toolNames = async (headers: Record<string, string>): Promise<string[]> => {
     const res = await post(headers, listTools);
     expect(res.status).toBe(200);
@@ -205,6 +249,20 @@ describe('server HTTP boundary', () => {
     expect(upstreamCalls).toEqual([]);
   });
 
+  it('rule 7: a captured write signature replayed with a different x-user-token is 401', async () => {
+    const captured = v2('write');
+    expect((await post(captured, listTools)).status).toBe(200);
+    expect((await post({ ...captured, 'x-user-token': 'attacker-token' }, listTools)).status).toBe(401);
+  });
+
+  it('rule 6: a UTF-8 UPN is percent-encoded and verifies; raw non-ASCII or malformed values are 401, never 500', async () => {
+    const ok = await post(v2('write', 'josé@example.com'), callTool('cipp_exec_tool', { name: 'ExecGetRecoveryKey' }));
+    expect(ok.status).toBe(200);
+    expect((await post({ ...v2('read'), 'x-mcp-user': 'josé@example.com' }, listTools)).status).toBe(401);
+    expect((await post({ ...v2('read'), 'x-mcp-user': encodeURIComponent('林') }, listTools)).status).toBe(401);
+    expect((await post({ ...v2('read'), 'x-mcp-user': 'jos%C3' }, listTools)).status).toBe(401);
+  });
+
   it('with ITSL_REQUIRE_USER_TOKEN, a request carrying client credentials but no x-user-token is 401', async () => {
     const headers: Record<string, string> = {
       ...v2('write'),
@@ -227,7 +285,7 @@ describe('server HTTP boundary', () => {
       expect(names).not.toContain('cipp_create_user');
       expect(names).not.toContain('cipp_run_standards_check');
     }
-    expect(read).toHaveLength(write.length); // 14 write tools are disabled at BOTH tiers
+    expect(read).toHaveLength(write.length); // the 14 write tools are disabled at BOTH tiers
   });
 
   it('write-tier exec runs through the real server; read-tier exec is refused and CIPP never sees it', async () => {

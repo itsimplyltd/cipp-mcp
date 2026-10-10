@@ -31,7 +31,18 @@ const BLOCKED_LITERAL = [
   'ListOpenApiSpec',
   'ListCippDocs',
   'ListExtensionsConfig',
+  // security-review rulings
+  'ListGraphRequest',
+  'ListGraphBulkRequest',
+  'ExecGraphExplorerPreset',
+  'ExecGraphRequestProfile',
+  'ExecListBackup',
+  'ListApiTest',
+  'ListExoRequest',
 ];
+
+// Rule 3: named tools that POST to a read endpoint are disabled pending review.
+const POST_READ_NAMED_TOOLS = ['cipp_bec_check', 'cipp_list_scheduled_items'];
 
 const WYRE_WRITE_TOOLS = [
   'cipp_create_user',
@@ -75,6 +86,7 @@ const cippCalls = (): string[] =>
 
 const handler = (ctx: ToolContext) => new CippToolHandler(svc, logger, ctx);
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
+const body = (r: { content: Array<{ text: string }> }) => r.content[0]!.text.slice(r.content[0]!.text.indexOf(String.fromCharCode(10)) + 1);
 
 beforeEach(() => {
   catalogueStore.reset();
@@ -91,17 +103,19 @@ describe('named tools: tier from the CIPP endpoint they call', () => {
     }
   });
 
-  it('the 33 read-only named tools are read tier', () => {
-    const reads = TOOL_DEFINITIONS.map((t) => t.name).filter((n) => !WYRE_WRITE_TOOLS.includes(n));
-    expect(reads).toHaveLength(33);
-    for (const t of reads) expect(namedToolTier(t)).toBe('read');
+  it('the 31 GET-only read named tools are read tier; the 2 POST-read tools are disabled (rule 3)', () => {
+    const nonWrite = TOOL_DEFINITIONS.map((t) => t.name).filter((n) => !WYRE_WRITE_TOOLS.includes(n));
+    expect(nonWrite).toHaveLength(33);
+    for (const t of nonWrite) {
+      expect(namedToolTier(t)).toBe(POST_READ_NAMED_TOOLS.includes(t) ? 'disabled' : 'read');
+    }
   });
 
   it.each(WYRE_WRITE_TOOLS)('%s is refused for read AND write callers and never reaches CIPP', async (tool) => {
     for (const ctx of [READ, WRITE]) {
       const res = await handler(ctx).handleToolCall(tool, { tenantFilter: 't.example', userId: 'u', displayName: 'd' });
       expect(res.isError).toBe(true);
-      expect(text(res)).toMatch(/^Refused:/);
+      expect(text(res)).toMatch(/Refused:/);
       expect(text(res)).not.toMatch(/not found/i);
     }
     expect(fetchMock).not.toHaveBeenCalled();
@@ -146,7 +160,8 @@ describe('tools/list is filtered by tier', () => {
       for (const m of META_TOOL_NAMES) expect(names).toContain(m);
       expect(names).toContain('cipp_list_users');
       expect(names).toContain('cipp_list_tenants');
-      expect(names).toHaveLength(33 + META_TOOL_NAMES.length);
+      expect(names).toHaveLength(31 + META_TOOL_NAMES.length);
+      for (const t of POST_READ_NAMED_TOOLS) expect(names).not.toContain(t);
     }
   });
 });
@@ -233,38 +248,21 @@ describe('cipp_exec_tool enforcement', () => {
     expect(cippCalls()).toEqual([]);
   });
 
-  it('refuses ListGraphRequest paths that would reopen blocked secrets, via exec and cipp_graph_request', async () => {
-    for (const endpoint of ['informationProtection/bitlocker/recoveryKeys', 'deviceManagement/x/deviceLocalCredentials', 'users/u/authentication/temporaryAccessPassMethods', 'a%2Fbitlocker%2Fkeys']) {
-      const viaExec = await handler(WRITE).handleToolCall('cipp_exec_tool', { name: 'ListGraphRequest', arguments: { tenantFilter: 't', Endpoint: endpoint } });
-      expect(viaExec.isError).toBe(true);
-      const viaGraph = await handler(WRITE).handleToolCall('cipp_graph_request', { tenantFilter: 't', endpoint });
-      expect(viaGraph.isError).toBe(true);
-    }
-    expect(cippCalls()).toEqual([]);
-  });
-
-  it('cipp_graph_request runs an ordinary read', async () => {
-    const res = await handler(READ).handleToolCall('cipp_graph_request', { tenantFilter: 't', endpoint: 'users', $top: 5 });
-    expect(res.isError).toBeUndefined();
-    const [url] = fetchMock.mock.calls.find(([u]) => u.includes('/api/ListGraphRequest'))!;
-    expect(new URL(url).searchParams.get('Endpoint')).toBe('users');
-    expect(new URL(url).searchParams.get('$top')).toBe('5');
-  });
 });
 
 describe('cipp_search_tools / cipp_get_tool_info', () => {
   it('search shows a read caller ListThings but not ExecCIPPDBCache; a write caller sees it', async () => {
-    const r = JSON.parse(text(await handler(READ).handleToolCall('cipp_search_tools', { limit: 100 })));
+    const r = JSON.parse(body(await handler(READ).handleToolCall('cipp_search_tools', { limit: 100 })));
     const names: string[] = r.results.map((x: { name: string }) => x.name);
     expect(names).toContain('ListThings');
     expect(names).not.toContain('ExecCIPPDBCache');
-    const w = JSON.parse(text(await handler(WRITE).handleToolCall('cipp_search_tools', { limit: 100 })));
+    const w = JSON.parse(body(await handler(WRITE).handleToolCall('cipp_search_tools', { limit: 100 })));
     expect(w.results.map((x: { name: string }) => x.name)).toContain('ExecCIPPDBCache');
   });
 
   it('get_tool_info returns a schema for callable entries and refuses the rest, naming the reason', async () => {
     const res = JSON.parse(
-      text(await handler(READ).handleToolCall('cipp_get_tool_info', { names: ['ListThings', 'ExecCIPPDBCache', 'ExecGetRecoveryKey', 'ExecDisableUser'] }))
+      body(await handler(READ).handleToolCall('cipp_get_tool_info', { names: ['ListThings', 'ExecCIPPDBCache', 'ExecGetRecoveryKey', 'ExecDisableUser'] }))
     );
     expect(res[0].inputSchema).toBeDefined();
     expect(res[1].error).toMatch(/write-tier/);
@@ -283,7 +281,7 @@ describe('source guards: the named-tool table cannot go stale', () => {
     let m: RegExpExecArray | null;
     while ((m = re.exec(service))) used.add(m[1]!);
     expect(used.size).toBeGreaterThan(30);
-    const covered = new Set(Object.values(NAMED_TOOL_ENDPOINTS).flat());
+    const covered = new Set(Object.values(NAMED_TOOL_ENDPOINTS).flat().map((e) => e.split('#')[0]));
     expect([...used].filter((e) => !covered.has(e))).toEqual([]);
   });
 
