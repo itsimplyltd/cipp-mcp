@@ -21,7 +21,7 @@ export const BLOCKED_NAMES: readonly string[] = [
   'ExecBitlockerSearch', // searches BitLocker recovery keys
   // RULING (security review): Graph is reachable ONLY through cipp_graph_request,
   // which builds its own call from an allowlist (src/itsl/graph.ts). These four
-  // are arbitrary-Graph or Graph-state relays and are never callable via cipp_exec_tool.
+  // are arbitrary-Graph or Graph-state relays and are never callable via cipp_exec_read / cipp_exec_write.
   'ListGraphRequest',
   'ListGraphBulkRequest',
   'ExecGraphExplorerPreset', // saves/deletes CIPP presets

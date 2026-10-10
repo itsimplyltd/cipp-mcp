@@ -44,7 +44,7 @@ describe('N1: argument value validation, centrally, before dispatch', () => {
   ];
 
   it.each(PAYLOADS)('exec of %s with a path-injection value is refused and never reaches CIPP', async (name, args) => {
-    const res = await handler().handleToolCall('cipp_exec_tool', { name, arguments: args });
+    const res = await handler().handleToolCall('cipp_exec_read', { name, arguments: args });
     expect(res.isError).toBe(true);
     expect(text(res)).toMatch(/Refused: argument '(UserID|DeviceID|report)' contains/);
     expect(cippCalls()).toEqual([]);
@@ -113,7 +113,7 @@ describe('N1: argument value validation, centrally, before dispatch', () => {
   });
 
   it('ordinary values still work: GUIDs, UPNs, domains, dates, filters with slashes', async () => {
-    const ok = await handler().handleToolCall('cipp_exec_tool', {
+    const ok = await handler().handleToolCall('cipp_exec_read', {
       name: 'ListThings',
       arguments: { tenantFilter: 'contoso.com', userId: '3f2a9c1e-1111-4222-8333-444455556666', filter: "startswith(a,'x/y')" },
     });

@@ -65,7 +65,9 @@ export class CippToolHandler {
         },
       ];
     });
-    return [...named, ...META_TOOL_DEFINITIONS];
+    // cipp_exec_write exists only for write-tier callers.
+    const meta = META_TOOL_DEFINITIONS.filter((t) => t.name !== 'cipp_exec_write' || this.context.tier === 'write');
+    return [...named, ...meta];
   }
 
   /**

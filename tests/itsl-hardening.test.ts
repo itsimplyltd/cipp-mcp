@@ -110,14 +110,18 @@ describe('b) every listed tool has annotations that reflect its effective behavi
       expect(t.annotations!.destructiveHint).toBe(false);
     }
     const by = (n: string) => tools.find((t) => t.name === n)!.annotations!;
-    // everything listed except cipp_exec_tool is read-only
+    // everything listed except cipp_exec_write is read-only
     for (const t of tools) {
-      if (t.name === 'cipp_exec_tool') continue;
+      if (t.name === 'cipp_exec_write') continue;
       expect(t.annotations!.readOnlyHint).toBe(true);
     }
-    expect(by('cipp_exec_tool').readOnlyHint).toBe(false);
-    expect(by('cipp_exec_tool').idempotentHint).toBe(false);
-    expect(by('cipp_exec_tool').destructiveHint).toBe(false);
+    expect(by('cipp_exec_read')).toMatchObject({ readOnlyHint: true, openWorldHint: true, destructiveHint: false, idempotentHint: true });
+    if (ctx.tier === 'write') {
+      expect(by('cipp_exec_write')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: false });
+    } else {
+      expect(tools.some((t) => t.name === 'cipp_exec_write')).toBe(false);
+    }
+    expect(tools.some((t) => t.name === 'cipp_exec_tool')).toBe(false);
     expect(by('cipp_search_tools').readOnlyHint).toBe(true);
     expect(by('cipp_get_tool_info').readOnlyHint).toBe(true);
     expect(by('cipp_graph_request').readOnlyHint).toBe(true);
@@ -139,7 +143,7 @@ describe('c) results are framed as untrusted data, JSON untouched', () => {
   it('uses n/a when there is no tenant, and takes the tenant from exec arguments', async () => {
     const none = await handler(READ).handleToolCall('cipp_ping', {});
     expect(text(none).split('\n')[0]).toBe(frameLine('n/a'));
-    const viaExec = await handler(READ).handleToolCall('cipp_exec_tool', { name: 'ListThings', arguments: { tenantFilter: 'fabrikam.com' } });
+    const viaExec = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { tenantFilter: 'fabrikam.com' } });
     expect(text(viaExec).split('\n')[0]).toBe(frameLine('fabrikam.com'));
   });
 
@@ -151,7 +155,7 @@ describe('c) results are framed as untrusted data, JSON untouched', () => {
   it('catalogue and refusal results are framed too (every tool result)', async () => {
     for (const [tool, args] of [
       ['cipp_search_tools', {}],
-      ['cipp_exec_tool', { name: 'ExecGetRecoveryKey' }],
+      ['cipp_exec_read', { name: 'ExecGetRecoveryKey' }],
       ['cipp_create_user', { tenantFilter: 't' }],
     ] as const) {
       const res = await handler(READ).handleToolCall(tool, { ...args });
@@ -176,7 +180,7 @@ describe('d) CIPP errors are echoed truncated to 500 characters and framed', () 
 
   it('an exec error is framed and truncated', async () => {
     install((url) => (url.includes('/api/ListThings') ? ({ ok: false, status: 500, text: async () => longBody } as unknown as Response) : jsonResponse(url.includes('ListOpenApiSpec') ? fixture : {})));
-    const res = await handler(READ).handleToolCall('cipp_exec_tool', { name: 'ListThings', arguments: { tenantFilter: 'contoso.com' } });
+    const res = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { tenantFilter: 'contoso.com' } });
     expect(res.isError).toBe(true);
     expect(text(res).split('\n')[0]).toBe(frameLine('contoso.com'));
     expect(text(res).length).toBeLessThanOrEqual(frameLine('contoso.com').length + 1 + MAX_ERROR_CHARS + '... [truncated]'.length);

@@ -256,7 +256,7 @@ describe('server HTTP boundary', () => {
   });
 
   it('rule 6: a UTF-8 UPN is percent-encoded and verifies; raw non-ASCII or malformed values are 401, never 500', async () => {
-    const ok = await post(v2('write', 'josé@example.com'), callTool('cipp_exec_tool', { name: 'ExecGetRecoveryKey' }));
+    const ok = await post(v2('write', 'josé@example.com'), callTool('cipp_exec_read', { name: 'ExecGetRecoveryKey' }));
     expect(ok.status).toBe(200);
     expect((await post({ ...v2('read'), 'x-mcp-user': 'josé@example.com' }, listTools)).status).toBe(401);
     expect((await post({ ...v2('read'), 'x-mcp-user': encodeURIComponent('林') }, listTools)).status).toBe(401);
@@ -281,22 +281,25 @@ describe('server HTTP boundary', () => {
     const read = await toolNames(v2('read'));
     const write = await toolNames(v2('write'));
     for (const names of [read, write]) {
-      expect(names).toContain('cipp_exec_tool');
+      expect(names).toContain('cipp_exec_read');
+      expect(names).not.toContain('cipp_exec_tool');
       expect(names).not.toContain('cipp_create_user');
       expect(names).not.toContain('cipp_run_standards_check');
     }
-    expect(read).toHaveLength(write.length); // the 14 write tools are disabled at BOTH tiers
+    expect(read).not.toContain('cipp_exec_write');
+    expect(write).toContain('cipp_exec_write');
+    expect(write).toHaveLength(read.length + 1); // the 14 write tools are disabled at BOTH tiers
   });
 
   it('write-tier exec runs through the real server; read-tier exec is refused and CIPP never sees it', async () => {
     const args = { name: 'ExecCIPPDBCache', arguments: { Name: 'SharePointSharingLinks', tenantFilter: 'aviva.org.nz' } };
-    const denied = await post(v2('read'), callTool('cipp_exec_tool', args));
+    const denied = await post(v2('read'), callTool('cipp_exec_write', args));
     const deniedBody = (await denied.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
     expect(deniedBody.result.isError).toBe(true);
-    expect(deniedBody.result.content[0]!.text).toMatch(/write-tier/);
+    expect(deniedBody.result.content[0]!.text).toMatch(/write-tier|CIPP\.Write/);
     expect(upstreamCalls.some((c) => c.url.includes('/api/ExecCIPPDBCache'))).toBe(false);
 
-    const ok = await post(v2('write'), callTool('cipp_exec_tool', args));
+    const ok = await post(v2('write'), callTool('cipp_exec_write', args));
     expect(((await ok.json()) as { result: { isError?: boolean } }).result.isError).toBeUndefined();
     const call = upstreamCalls.find((c) => c.url.includes('/api/ExecCIPPDBCache'))!;
     expect(call.init?.method).toBe('POST');
@@ -305,7 +308,7 @@ describe('server HTTP boundary', () => {
   });
 
   it('never logs the user token or any Authorization value', async () => {
-    await post(v2('write'), callTool('cipp_exec_tool', { name: 'ExecGetRecoveryKey' }));
+    await post(v2('write'), callTool('cipp_exec_read', { name: 'ExecGetRecoveryKey' }));
     await post(v2('read'), callTool('cipp_list_users', { tenantFilter: 't' }));
     await post({ ...v2('read'), 'x-gateway-s2s': 'bad' }, listTools);
     expect(logged.length).toBeGreaterThan(0);

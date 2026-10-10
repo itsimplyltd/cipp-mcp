@@ -110,7 +110,9 @@ your tier can call.
 To reach any CIPP endpoint, use the catalogue tools:
 - cipp_search_tools: find endpoints you can call (search by keyword or browse a category)
 - cipp_get_tool_info: input schema for named endpoints
-- cipp_exec_tool: run an endpoint by name with 'arguments'
+- cipp_exec_read: run a read-tier endpoint by name with 'arguments' (listed for everyone)
+- cipp_exec_write: run a write-tier endpoint (cache/sync triggers); listed only with the CIPP.Write role
+  Search and tool-info results say which exec tool runs each entry (run_with).
 - cipp_graph_request: read-only Microsoft Graph query for a tenant through CIPP
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.

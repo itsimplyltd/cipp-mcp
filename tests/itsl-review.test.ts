@@ -47,7 +47,7 @@ describe('rule 1: Graph relays are blocked in the catalogue', () => {
   ];
   it.each(attempts.map((a, i) => [i, a] as const))('attempt %i is refused at both tiers and never reaches CIPP', async (_i, a) => {
     for (const ctx of [READ, WRITE]) {
-      const res = await handler(ctx).handleToolCall('cipp_exec_tool', a);
+      const res = await handler(ctx).handleToolCall('cipp_exec_read', a);
       expect(res.isError).toBe(true);
       expect(text(res)).toMatch(/Refused:/); // blocked by name, or refused earlier by value validation
     }
@@ -182,7 +182,7 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
 
 describe('rule 3: the read tier is GET-only', () => {
   it('exec of ListTenants is a GET; ClearCache, TriggerRefresh and AsApp never reach CIPP', async () => {
-    const ok = await handler(READ).handleToolCall('cipp_exec_tool', {
+    const ok = await handler(READ).handleToolCall('cipp_exec_read', {
       name: 'ListTenants',
       arguments: { ClearCache: true, TriggerRefresh: true, AllTenantSelector: true, AsApp: true },
     });
@@ -196,7 +196,7 @@ describe('rule 3: the read tier is GET-only', () => {
   it('POST-only .Read entries, ExecBECCheck and ListAuditLogSearches are disabled at both tiers', async () => {
     for (const name of ['ListPostOnlyRead', 'ExecBECCheck', 'ListAuditLogSearches']) {
       for (const ctx of [READ, WRITE]) {
-        const res = await handler(ctx).handleToolCall('cipp_exec_tool', { name });
+        const res = await handler(ctx).handleToolCall('cipp_exec_read', { name });
         expect(res.isError).toBe(true);
         expect(text(res)).toMatch(/disabled/);
       }
@@ -221,10 +221,10 @@ describe('rule 3: the read tier is GET-only', () => {
   });
 
   it('exec refuses keys differing only by case and canonicalises declared spellings', async () => {
-    const dup = await handler(READ).handleToolCall('cipp_exec_tool', { name: 'ListThings', arguments: { tenantFilter: 'a', TENANTFILTER: 'b' } });
+    const dup = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { tenantFilter: 'a', TENANTFILTER: 'b' } });
     expect(dup.isError).toBe(true);
     expect(cippCalls()).toEqual([]);
-    await handler(READ).handleToolCall('cipp_exec_tool', { name: 'ListThings', arguments: { TENANTFILTER: 'a' } });
+    await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { TENANTFILTER: 'a' } });
     expect(new URL(cippCalls()[0]!).searchParams.get('tenantFilter')).toBe('a');
   });
 });
@@ -233,7 +233,7 @@ describe('rule 4: backup and diagnostic endpoints are blocked', () => {
   it('no *Backup* endpoint, CIPP.Backup role, ExecListBackup, ListApiTest or ListExoRequest is callable', async () => {
     for (const name of ['ListSomeBackupThing', 'ListRoleBackupOnly', 'ExecListBackup', 'ListApiTest', 'ListExoRequest']) {
       for (const ctx of [READ, WRITE]) {
-        const res = await handler(ctx).handleToolCall('cipp_exec_tool', { name });
+        const res = await handler(ctx).handleToolCall('cipp_exec_read', { name });
         expect(res.isError).toBe(true);
         expect(text(res)).toMatch(/blocked/);
       }

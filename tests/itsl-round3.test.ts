@@ -40,7 +40,7 @@ describe('R1: keys ending "url" must be an https SharePoint URL', () => {
     for (const bad of BAD) expect(v({ [key]: bad })).toMatch(new RegExp(`argument '${key}' must be an https SharePoint URL`));
   });
 
-  it('applies to nested values under a url key and inside arguments of cipp_exec_tool', () => {
+  it('applies to nested values under a url key and inside arguments of cipp_exec_read', () => {
     expect(v({ name: 'X', arguments: { siteUrl: 'https://evil.example/x' } })).toMatch(/siteUrl/);
     expect(v({ name: 'X', arguments: { siteUrl: 'https://contoso.sharepoint.com/sites/a' } })).toBeUndefined();
     expect(v({ body: [{ webUrl: 'https://evil.example' }] })).toMatch(/webUrl/);

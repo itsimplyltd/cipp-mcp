@@ -31,7 +31,7 @@ const FILTER_KEYS = new Set(VALUE_FILTER_KEYS.map((k) => k.toLowerCase()));
  *  - `/`: only in filter/search keys (VALUE_SLASH_ALLOWED_KEYS) and `extraSlashKeys`
  *  - keys ending "url": the value must be an https SharePoint URL
  * The `&`, `/` and `#EXT#` allowances apply ONLY to top-level string values (the
- * tool's own arguments, or the `arguments` of cipp_exec_tool), never to anything
+ * tool's own arguments, or the `arguments` of cipp_exec_read / cipp_exec_write), never to anything
  * nested beneath a key. Recurses into arrays and objects (POST bodies).
  *
  * NOTE: these rules assume the read-only tool set. They must be revisited

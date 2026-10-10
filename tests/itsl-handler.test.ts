@@ -1,6 +1,6 @@
 // IT Simply guard tests at the single dispatch path (CippToolHandler.handleToolCall):
 // no blocked or disabled endpoint, and no write endpoint for a read caller, is
-// reachable through cipp_exec_tool or through any named tool.
+// reachable through cipp_exec_read or through any named tool.
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -157,22 +157,23 @@ describe('tools/list is filtered by tier', () => {
     for (const ctx of [READ, WRITE]) {
       const names = handler(ctx).getToolDefinitions().map((t) => t.name);
       for (const w of WYRE_WRITE_TOOLS) expect(names).not.toContain(w);
-      for (const m of META_TOOL_NAMES) expect(names).toContain(m);
+      for (const m of META_TOOL_NAMES.filter((n) => n !== 'cipp_exec_write')) expect(names).toContain(m);
+      expect(names.includes('cipp_exec_write')).toBe(ctx.tier === 'write');
       expect(names).toContain('cipp_list_users');
       expect(names).toContain('cipp_list_tenants');
-      expect(names).toHaveLength(31 + META_TOOL_NAMES.length);
+      expect(names).toHaveLength(31 + META_TOOL_NAMES.length - (ctx.tier === 'write' ? 0 : 1));
       for (const t of POST_READ_NAMED_TOOLS) expect(names).not.toContain(t);
     }
   });
 });
 
-describe('cipp_exec_tool enforcement', () => {
+describe('cipp_exec_read enforcement', () => {
   it.each(BLOCKED_LITERAL)('%s is refused for read and write callers, with and without a catalogue', async (name) => {
     for (const ctx of [READ, WRITE]) {
       for (const specOk of [true, false]) {
         catalogueStore.reset();
         installFetch(specOk);
-        const res = await handler(ctx).handleToolCall('cipp_exec_tool', { name, arguments: { tenantFilter: 't' } });
+        const res = await handler(ctx).handleToolCall('cipp_exec_read', { name, arguments: { tenantFilter: 't' } });
         expect(res.isError).toBe(true);
         expect(text(res)).toMatch(/blocked/);
         expect(cippCalls()).toEqual([]);
@@ -182,7 +183,7 @@ describe('cipp_exec_tool enforcement', () => {
 
   it('refuses spelling variants of blocked names', async () => {
     for (const name of ['execgetrecoverykey', 'EXECGETRECOVERYKEY', 'ExecGetRecoveryKey ', 'ExecGetRecoveryKey/', '../ExecGetRecoveryKey', 'ExecGetRecoveryKey?x=1']) {
-      const res = await handler(WRITE).handleToolCall('cipp_exec_tool', { name, arguments: {} });
+      const res = await handler(WRITE).handleToolCall('cipp_exec_read', { name, arguments: {} });
       expect(res.isError).toBe(true);
     }
     expect(cippCalls()).toEqual([]);
@@ -190,7 +191,7 @@ describe('cipp_exec_tool enforcement', () => {
 
   it('refuses by role pattern: SuperAdmin, AppSettings and Extension reads', async () => {
     for (const name of ['ListSuperThing', 'ListAppSettingThing', 'ListExtensionStatus', 'ExecAppSettingWrite']) {
-      const res = await handler(WRITE).handleToolCall('cipp_exec_tool', { name });
+      const res = await handler(WRITE).handleToolCall('cipp_exec_read', { name });
       expect(res.isError).toBe(true);
       expect(text(res)).toMatch(/blocked/);
     }
@@ -200,7 +201,7 @@ describe('cipp_exec_tool enforcement', () => {
   it('refuses disabled endpoints for everyone with a reason that is not "not found"', async () => {
     for (const name of ['ExecDisableUser', 'ExecBaselineRun', 'ListSneakyReadWrite', 'AddTestReport', 'ListNoRole', 'ListMixed']) {
       for (const ctx of [READ, WRITE]) {
-        const res = await handler(ctx).handleToolCall('cipp_exec_tool', { name });
+        const res = await handler(ctx).handleToolCall('cipp_exec_read', { name });
         expect(res.isError).toBe(true);
         expect(text(res)).toMatch(/disabled/);
         expect(text(res)).not.toMatch(/not found|not an endpoint/i);
@@ -212,7 +213,7 @@ describe('cipp_exec_tool enforcement', () => {
   it('a read-tier caller cannot run ANY write entry', async () => {
     const writes = ['ExecCIPPDBCache', 'ExecSyncAPDevices', 'ExecSyncDEP', 'ExecSyncVPP', 'ExecExtensionSync', 'ExecTestRefresh', 'ExecTestRun'];
     for (const name of writes) {
-      const res = await handler(READ).handleToolCall('cipp_exec_tool', { name, arguments: { Name: 'x', tenantFilter: 't' } });
+      const res = await handler(READ).handleToolCall('cipp_exec_read', { name, arguments: { Name: 'x', tenantFilter: 't' } });
       expect(res.isError).toBe(true);
       expect(text(res)).toMatch(/write-tier/);
     }
@@ -220,7 +221,7 @@ describe('cipp_exec_tool enforcement', () => {
   });
 
   it('a write-tier caller can run the write entries: POST, query params in the URL, rest in the body', async () => {
-    const res = await handler(WRITE).handleToolCall('cipp_exec_tool', {
+    const res = await handler(WRITE).handleToolCall('cipp_exec_write', {
       name: 'ExecCIPPDBCache',
       arguments: { Name: 'SharePointSharingLinks', tenantFilter: 'aviva.org.nz' },
     });
@@ -234,7 +235,7 @@ describe('cipp_exec_tool enforcement', () => {
   });
 
   it('read entries run for a read caller, sending the per-user token', async () => {
-    const res = await handler(READ).handleToolCall('cipp_exec_tool', { name: 'ListThings', arguments: { tenantFilter: 't.example', userId: 'u1' } });
+    const res = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { tenantFilter: 't.example', userId: 'u1' } });
     expect(res.isError).toBeUndefined();
     const [url, init] = fetchMock.mock.calls.find(([u]) => u.includes('/api/ListThings'))!;
     expect(init?.method).toBe('GET');
@@ -243,7 +244,7 @@ describe('cipp_exec_tool enforcement', () => {
   });
 
   it('an endpoint missing from the catalogue is refused, not called', async () => {
-    const res = await handler(WRITE).handleToolCall('cipp_exec_tool', { name: 'NotInSpec' });
+    const res = await handler(WRITE).handleToolCall('cipp_exec_read', { name: 'NotInSpec' });
     expect(res.isError).toBe(true);
     expect(cippCalls()).toEqual([]);
   });

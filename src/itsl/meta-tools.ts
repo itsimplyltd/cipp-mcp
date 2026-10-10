@@ -1,6 +1,6 @@
 // IT Simply Ltd: the catalogue meta-tools and the tier gate (new file).
 //
-// cipp_search_tools / cipp_get_tool_info / cipp_exec_tool / cipp_graph_request
+// cipp_search_tools / cipp_get_tool_info / cipp_exec_read / cipp_exec_write / cipp_graph_request
 // mirror the public CIPP MCP's meta-tool pattern. Every path that reaches CIPP
 // from here checks the target's tier against the caller's SIGNED tier first.
 
@@ -34,7 +34,8 @@ export const DEFAULT_CONTEXT: ToolContext = { tier: 'read' };
 export const META_TOOL_NAMES = [
   'cipp_search_tools',
   'cipp_get_tool_info',
-  'cipp_exec_tool',
+  'cipp_exec_read',
+  'cipp_exec_write',
   'cipp_graph_request',
 ] as const;
 
@@ -49,7 +50,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
   {
     name: 'cipp_search_tools',
     description:
-      "Search or browse the catalogue of CIPP API endpoints that you are allowed to call. Returns name, category, method, tier and a one-line summary; use cipp_get_tool_info for the input schema and cipp_exec_tool to run one. Endpoints your tier cannot call are never listed. Call with no query to browse; use 'category' to narrow (e.g. 'Identity', 'Email-Exchange', 'Endpoint', 'Tenant', 'Security', 'Teams-Sharepoint', 'CIPP').",
+      "Search or browse the catalogue of CIPP API endpoints that you are allowed to call. Returns name, category, method, tier and a one-line summary; use cipp_get_tool_info for the input schema and cipp_exec_read to run one. Endpoints your tier cannot call are never listed. Call with no query to browse; use 'category' to narrow (e.g. 'Identity', 'Email-Exchange', 'Endpoint', 'Tenant', 'Security', 'Teams-Sharepoint', 'CIPP').",
     inputSchema: {
       type: 'object',
       properties: {
@@ -79,9 +80,9 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
     annotations: { title: 'Get CIPP endpoint schema', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   {
-    name: 'cipp_exec_tool',
+    name: 'cipp_exec_read',
     description:
-      "Run a CIPP endpoint from the catalogue by name. Arguments go in 'arguments': they become query parameters for GET endpoints, or for POST endpoints the declared query parameters plus a JSON body. Read-tier endpoints run for everyone; write-tier endpoints (currently only cache and sync triggers) need the CIPP.Write role. Blocked and disabled endpoints are refused. CIPP still applies your own CIPP role.",
+      "Run a read-only CIPP catalogue endpoint by name (entries cipp_search_tools marks run_with cipp_exec_read). Arguments go in 'arguments' and become query parameters of a GET. Runs only read-tier endpoints; write, disabled and blocked entries are refused. CIPP still applies your own CIPP role.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,7 +91,21 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
       },
       required: ['name'],
     },
-    annotations: { title: 'Run a CIPP endpoint', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    annotations: { title: 'Run a read-only CIPP endpoint', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: 'cipp_exec_write',
+    description:
+      "Run a write-tier CIPP catalogue endpoint by name (entries marked run_with cipp_exec_write; at launch only cache and sync triggers). Needs the CIPP.Write gateway role. Refuses read entries (use cipp_exec_read), and disabled or blocked entries. Arguments go in 'arguments': declared query parameters plus a JSON body. CIPP still applies your own CIPP role.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Endpoint name from cipp_search_tools.' },
+        arguments: { type: 'object', description: 'Arguments matching the schema from cipp_get_tool_info.' },
+      },
+      required: ['name'],
+    },
+    annotations: { title: 'Run a write-tier CIPP endpoint', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   },
   {
     name: 'cipp_graph_request',
@@ -214,7 +229,13 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       return text(out);
     }
 
-    case 'cipp_exec_tool': {
+    case 'cipp_exec_read':
+    case 'cipp_exec_write': {
+      const want: Tier = name === 'cipp_exec_write' ? 'write' : 'read';
+      if (want === 'write' && deps.ctx.tier !== 'write') {
+        logRefusal(deps, name, 'cipp_exec_write', 'write');
+        return text('Refused: cipp_exec_write is a write-tier tool and your gateway tier is read. Ask IT Simply to grant the CIPP.Write role.', true);
+      }
       const target = args['name'];
       if (typeof target !== 'string' || target.trim() === '') return text("Provide 'name': the endpoint to run.", true);
       const callArgs = args['arguments'];
@@ -242,6 +263,10 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       if (!isCallable(tier, deps.ctx.tier)) {
         logRefusal(deps, name, entry.name, tier);
         return text(refusalReason(entry.name, tier, deps.ctx.tier), true);
+      }
+      if (tier !== want) {
+        logRefusal(deps, name, entry.name, tier);
+        return text(`Refused: '${entry.name}' is a ${tier}-tier endpoint; run it with ${runWith(tier)}, not ${name}.`, true);
       }
       const canon = canonicaliseArguments(entry, (callArgs ?? {}) as Record<string, unknown>);
       if (!canon.ok) return text(`Refused: ${canon.reason}`, true);
@@ -272,8 +297,14 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
   }
 }
 
+/** Which exec tool runs an entry of this tier. */
+export function runWith(tier: Tier): string {
+  return tier === 'write' ? 'cipp_exec_write' : 'cipp_exec_read';
+}
+
 function describe(e: CatalogueEntry) {
   return {
+    run_with: runWith(e.tier),
     name: e.name,
     category: e.category,
     method: e.method,

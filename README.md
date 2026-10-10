@@ -8,7 +8,7 @@ MCP (Model Context Protocol) server for [CIPP](https://github.com/CyberDrain/CIP
 
 ## Features
 
-- **47 named tools** plus a tiered catalogue of CIPP's whole API (`cipp_search_tools`, `cipp_get_tool_info`, `cipp_exec_tool`); only tools your tier can call are listed
+- **47 named tools** plus a tiered catalogue of CIPP's whole API (`cipp_search_tools`, `cipp_get_tool_info`, `cipp_exec_read` / `cipp_exec_write`); only tools your tier can call are listed
 - Tenant, user, group, and mailbox visibility
 - Mailbox and online-archive size reporting, per tenant or per user
 - Per-user Entra ID sign-in logs (status, location, Conditional Access, MFA)
@@ -239,7 +239,7 @@ Per Apache License 2.0 section 4(b), each modified upstream file carries a
 **The 14 write tools are present again but unreachable.** An earlier version of this
 fork deleted them; they are restored from upstream and held back by policy instead,
 so a merge from upstream stays conflict-light. Every tool, and every endpoint
-reached through `cipp_exec_tool`, gets a tier from `src/itsl/policy.ts`:
+reached through `cipp_exec_read` / `cipp_exec_write`, gets a tier from `src/itsl/policy.ts`:
 
 | Tier | Meaning |
 |---|---|

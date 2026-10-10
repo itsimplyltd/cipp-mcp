@@ -233,6 +233,7 @@ export function searchEntries(
       category: e.category,
       method: e.method,
       tier: e.tier,
+      run_with: e.tier === 'write' ? 'cipp_exec_write' : 'cipp_exec_read',
       summary: e.summary,
     })),
   };
