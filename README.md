@@ -2,13 +2,13 @@
 
 MCP (Model Context Protocol) server for [CIPP](https://github.com/CyberDrain/CIPP) — the CyberDrain Improved Partner Portal. Provides AI assistants with structured access to CIPP's M365 multi-tenant management capabilities.
 
-> **This is IT Simply's read-only fork.** 14 write-capable tools present in
-> upstream have been removed. See [IT Simply modifications](#it-simply-modifications)
-> below.
+> **This is IT Simply's tiered fork.** Every CIPP endpoint is read, write, disabled or
+> blocked, and the 14 write tools stay disabled. See
+> [IT Simply modifications](#it-simply-modifications) below.
 
 ## Features
 
-- **33 tools** across 12 categories, all read-only
+- **47 named tools** plus a tiered catalogue of CIPP's whole API (`cipp_search_tools`, `cipp_get_tool_info`, `cipp_exec_tool`); only tools your tier can call are listed
 - Tenant, user, group, and mailbox visibility
 - Mailbox and online-archive size reporting, per tenant or per user
 - Per-user Entra ID sign-in logs (status, location, Conditional Access, MFA)
@@ -232,55 +232,47 @@ API client's allowed range.
 
 ## IT Simply modifications
 
-This is IT Simply Ltd's fork of [`WYRE-AI/cipp-mcp`](https://github.com/WYRE-AI/cipp-mcp),
-forked from upstream commit [`56e39301`](https://github.com/WYRE-AI/cipp-mcp/commit/56e39301a07b34fede5ca59c424a94b85f8f4ba4).
-Per Apache License 2.0 §4(b), this notice records that the files below were
-changed from that upstream version.
+This is IT Simply Ltd's fork of [`WYRE-AI/cipp-mcp`](https://github.com/WYRE-AI/cipp-mcp).
+Per Apache License 2.0 section 4(b), each modified upstream file carries a
+"Modified by IT Simply Ltd, 2026" line at the top. New IT Simply code lives in `src/itsl/`.
 
-**14 write-capable tools were removed** — their tool definitions, dispatch
-cases, and underlying `CippService` HTTP methods — so this server can only
-read CIPP data, never modify a managed tenant. This is deliberate: CIPP can
-reset passwords, delete accounts, redirect mail, and push conditional access
-policies across every customer tenant it manages, and IT Simply runs this
-server with read-only intent. Deleting the code, rather than gating it behind
-a configuration flag, means there is no flag to mistype and no write path left
-for a future tool to reach even if reintroduced.
+**The 14 write tools are present again but unreachable.** An earlier version of this
+fork deleted them; they are restored from upstream and held back by policy instead,
+so a merge from upstream stays conflict-light. Every tool, and every endpoint
+reached through `cipp_exec_tool`, gets a tier from `src/itsl/policy.ts`:
 
-Removed tools:
-
-| Tool | Reason |
+| Tier | Meaning |
 |---|---|
-| `cipp_create_user` | creates an AAD user |
-| `cipp_edit_user` | edits attributes, adds/strips licences |
-| `cipp_disable_user` | blocks sign-in |
-| `cipp_reset_password` | invalidates the current password |
-| `cipp_reset_mfa` | clears all MFA methods |
-| `cipp_revoke_sessions` | kills sessions and refresh tokens |
-| `cipp_offboard_user` | can pass `DeleteUser: true` — irreversible |
-| `cipp_create_group` | creates an AAD group |
-| `cipp_set_out_of_office` | sets mailbox auto-reply |
-| `cipp_set_email_forwarding` | redirects mail; a data-exfiltration vector |
-| `cipp_run_standards_check` | reads as a check, but applies remediation if the tenant's Standards Template has a Remediate-action standard |
-| `cipp_create_standard_template` | upserts a template that modifies tenants on the next standards run |
-| `cipp_delete_standard_template` | silently un-enforces whatever it enforced |
-| `cipp_add_scheduled_item` | forwards an arbitrary command string to CIPP's scheduler, optionally against every managed tenant |
+| `read` | Callable by everyone: a `.Read` role on a non-mutating endpoint name (CIPP's own rule) |
+| `write` | Callable only with the CIPP.Write gateway role: the cache and sync triggers on the allowlist |
+| `disabled` | Everything else; refused for everyone until promoted in the `REVIEWED` map |
+| `blocked` | Sensitive or dangerous (LAPS, BitLocker, MFA push, SuperAdmin/AppSettings/Extension config); always wins |
 
-`tests/tool-guard.test.ts` is new IT Simply code (not present upstream) that
-asserts `TOOL_DEFINITIONS.length === 31` and that none of the 14 names above
-are present, so a future `git merge upstream/main` that silently reintroduces
-one of these tools fails the build rather than shipping.
+The tier check is in one place, `CippToolHandler.handleToolCall`, so no tool can
+skip it. `tools/list` is filtered by tier. CIPP still applies each user's own CIPP role.
 
-Files changed from upstream: `src/mcp/tool.definitions.ts`,
-`src/handlers/tool.handler.ts`, `src/services/cipp.service.ts`,
-`tests/cipp.service.standards.test.ts`, `README.md` (this file), and the
-addition of `tests/tool-guard.test.ts`. Five now-dead test files that covered
-only removed tools were deleted:
-`tests/cipp.service.create-user.test.ts`, `tests/cipp.service.edit-user.test.ts`,
-`tests/cipp.service.offboard-user.test.ts`, `tests/cipp.service.mailbox.test.ts`,
-`tests/cipp.service.scheduled-items.test.ts`.
+Per-user mode: in `AUTH_MODE=gateway` the `x-user-token` header is the credential
+CIPP sees (and the only one used). The caller's tier and user come only from a
+verified S2S v2 header `x-gateway-s2s: t=<unix>,v2=<hex>` where
+`v2 = HMAC-SHA256(secret, "t=<unix>
+tier=<read|write>
+user=<upn>")`.
 
-`listEnterpriseApps` was kept: it calls CIPP's `ListGraphRequest` relay with a
-hardcoded GET query and is a legitimate read, not a write in disguise.
+| Env var | Effect |
+|---|---|
+| `CONDUIT_S2S_SECRET` | S2S secret (as upstream) |
+| `ITSL_REQUIRE_S2S_V2` | `true`: only a verified v2 header is accepted; tier defaults to read otherwise |
+| `ITSL_REQUIRE_USER_TOKEN` | `true`: any request without `x-user-token` gets 401 |
+| `ITSL_SPEC_PATH` | CIPP endpoint serving the OpenAPI spec (default `ListOpenApiSpec`) |
+| `ITSL_SPEC_GITHUB_REPO` | Fallback spec repo (default `KelvinTegelaar/CIPP-API`) |
+
+The catalogue is projected from CIPP's OpenAPI document at first use and every 6 hours.
+CIPP-API is AGPL-3.0: this repository never contains its `openapi.json` or code.
+
+Guard tests (`tests/itsl-*.test.ts`) fail the build if a blocked name is callable,
+a `ReadWrite` endpoint computes to read, a read caller can run a write entry, a
+write tool becomes reachable, or an unsigned/v1-only request is accepted with
+`ITSL_REQUIRE_S2S_V2=true`.
 
 ## License
 
