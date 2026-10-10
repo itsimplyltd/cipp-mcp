@@ -246,6 +246,8 @@ export function searchEntries(
 export interface SpecFetcher {
   name: string;
   fetch(): Promise<unknown>;
+  /** The CIPP version this source is matched to, if known (for the success log). */
+  version?: () => string | undefined;
 }
 
 export interface CatalogueLogger {
@@ -266,6 +268,7 @@ export class CatalogueStore {
   private current: Catalogue | undefined;
   private inFlight: Promise<Catalogue> | undefined;
   private lastFailureAt = 0;
+  private lastVersion: string | undefined;
   private seen = new Set<string>();
 
   constructor(
@@ -315,6 +318,7 @@ export class CatalogueStore {
     for (const f of fetchers) {
       try {
         const cat = projectSpec(await f.fetch(), f.name, this.clock());
+        this.lastVersion = f.version?.();
         if (cat.entries.size === 0) throw new Error('spec contained no usable paths');
         const prev = this.current;
         this.current = cat;
@@ -323,7 +327,7 @@ export class CatalogueStore {
         return cat;
       } catch (err) {
         failures.push(`${f.name}: ${errMsg(err)}`);
-        logger.debug('CIPP spec source failed', { source: f.name, error: errMsg(err) });
+        logger.warn('CIPP spec source failed', { source: f.name, error: errMsg(err) });
       }
     }
     throw new Error(
@@ -349,7 +353,7 @@ export class CatalogueStore {
     for (const e of fresh) this.seen.add(e.name.toLowerCase());
     const counts: Record<string, number> = {};
     for (const e of cat.entries.values()) counts[e.tier] = (counts[e.tier] ?? 0) + 1;
-    logger.info('CIPP catalogue loaded', { source: cat.source, endpoints: cat.entries.size, tiers: counts });
+    logger.info('CIPP catalogue loaded', { source: cat.source, version: this.lastVersion, endpoints: cat.entries.size, tiers: counts });
     if (first) return; // the summary above covers the initial load
     for (const e of fresh) {
       logger.info('New CIPP endpoint', { name: e.name, role: e.role, tier: e.tier });
@@ -381,6 +385,12 @@ export interface SpecApi {
 
 const SPEC_TIMEOUT_MS = 60_000;
 
+async function fetchText(url: string, fetchImpl: typeof fetch): Promise<string> {
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(SPEC_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}`);
+  return res.text();
+}
+
 async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
   const res = await fetchImpl(url, {
     signal: AbortSignal.timeout(SPEC_TIMEOUT_MS),
@@ -395,6 +405,10 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
  *  1. our own CIPP's `GET /api/ListOpenApiSpec` with the caller's token (path overridable with ITSL_SPEC_PATH).
  *  2. the `openapi.enriched.json` asset on the CIPP-API GitHub release that matches `GET /api/GetVersion`.
  *  3. `Config/openapi.json` of that release tag, fetched at runtime (never stored in this repo).
+ *  4. `Config/openapi.json` from a branch (ITSL_SPEC_BRANCHES, default master,dev) whose
+ *     `version_latest.txt` EQUALS the reported version exactly. A branch with a different
+ *     version is never used (unreleased code would drift the tiers). Needed because CIPP
+ *     versions can run ahead of the repo's tags.
  * (2) and (3) exist because (1) could not be confirmed to exist in CIPP's public code; see the build report.
  */
 export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetch): SpecFetcher[] {
@@ -410,6 +424,9 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
     });
     return tagPromise;
   };
+  const reported = (): Promise<string> => releaseTag();
+  const branches = (process.env.ITSL_SPEC_BRANCHES || 'master,dev').split(',').map((b) => b.trim()).filter(Boolean);
+  let matched: string | undefined;
   return [
     { name: 'cipp-api', fetch: () => api.callEndpoint('GET', specPath, undefined, undefined, SPEC_TIMEOUT_MS) },
     {
@@ -421,6 +438,30 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
       name: 'github-tag-file',
       fetch: async () =>
         fetchJson(`https://raw.githubusercontent.com/${repo}/${await releaseTag()}/Config/openapi.json`, fetchImpl),
+    },
+    {
+      name: 'github-branch-matching-version',
+      version: () => matched,
+      fetch: async () => {
+        const want = await reported();
+        const seen: string[] = [];
+        for (const branch of branches) {
+          let have: string;
+          try {
+            have = (await fetchText(`https://raw.githubusercontent.com/${repo}/${branch}/version_latest.txt`, fetchImpl)).trim();
+          } catch (err) {
+            seen.push(`${branch}: ${errMsg(err)}`);
+            continue;
+          }
+          seen.push(`${branch}: ${have}`);
+          if (have === want) {
+            const spec = await fetchJson(`https://raw.githubusercontent.com/${repo}/${branch}/Config/openapi.json`, fetchImpl);
+            matched = want;
+            return spec;
+          }
+        }
+        throw new Error(`no branch matches the reported CIPP version ${want} (${seen.join('; ')})`);
+      },
     },
   ];
 }
