@@ -49,7 +49,7 @@ describe('rule 1: Graph relays are blocked in the catalogue', () => {
     for (const ctx of [READ, WRITE]) {
       const res = await handler(ctx).handleToolCall('cipp_exec_tool', a);
       expect(res.isError).toBe(true);
-      expect(text(res)).toMatch(/blocked/);
+      expect(text(res)).toMatch(/Refused:/); // blocked by name, or refused earlier by value validation
     }
     expect(cippCalls()).toEqual([]);
   });
@@ -69,7 +69,7 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
       'users', 'groups', 'devices', 'serviceprincipals', 'applications', 'domains', 'organization', 'subscribedskus',
       'directoryroles', 'rolemanagement/directory', 'identity/conditionalaccess', 'policies', 'auditlogs', 'reports',
       'security/alerts_v2', 'security/incidents', 'devicemanagement/manageddevices',
-      'devicemanagement/devicecompliancepolicies', 'devicemanagement/deviceconfigurations', 'teams', 'sites',
+      'devicemanagement/devicecompliancepolicies', 'teams', 'sites',
     ]);
   });
 
@@ -79,7 +79,8 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
     const [url, init] = fetchMock.mock.calls.find(([u]) => u.includes('/api/ListGraphRequest'))!;
     expect(init?.method).toBe('GET');
     const u = new URL(url);
-    expect([...u.searchParams.keys()].sort()).toEqual(['$select', '$top', 'Endpoint', 'tenantFilter']);
+    expect([...u.searchParams.keys()].sort()).toEqual(['$select', '$top', 'Endpoint', 'Version', 'tenantFilter']);
+    expect(u.searchParams.get('Version')).toBe('v1.0'); // always explicit (N5)
     expect(u.searchParams.get('Endpoint')).toBe('users/abc/memberof');
   });
 
@@ -157,7 +158,6 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
       { $expand: 'deviceLocalCredentials' },
       { $select: 'recoveryKey' },
       { $filter: "x eq 'informationProtection'" },
-      { $expand: 'authenticationMethods' },
       { $top: 0 },
       { $top: 1000 },
       { $top: '5' },

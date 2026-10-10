@@ -4,6 +4,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
+import { validateArgumentValues } from '../itsl/values.js';
 import { frameResult, truncateError, tenantOf } from '../itsl/frame.js';
 import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
@@ -90,6 +91,9 @@ export class CippToolHandler {
     // IT Simply tier gate. This is the single path every tool call takes, so
     // nothing below (the switch) can run for a tool the caller's tier forbids.
     if (isMetaTool(name)) {
+      // Central value check (N1); cipp_graph_request's `endpoint` is a path it validates itself.
+      const bad = validateArgumentValues(args, name === 'cipp_graph_request' ? ['endpoint'] : []);
+      if (bad) return { content: [{ type: 'text', text: `Refused: ${bad}` }], isError: true };
       return runMetaTool(name, args, {
         service: this.cippService,
         logger: this.logger,
@@ -109,6 +113,12 @@ export class CippToolHandler {
         user: this.context.user,
       });
       return { content: [{ type: 'text', text: decision.reason }], isError: true };
+    }
+
+    const badValue = validateArgumentValues(args);
+    if (badValue) {
+      this.logger.warn('CIPP tool call refused: argument value', { tool: name, user: this.context.user });
+      return { content: [{ type: 'text', text: `Refused: ${badValue}` }], isError: true };
     }
 
     this.logger.debug(`Tool call passed the tier gate: ${name}`, { argumentKeys: Object.keys(args) });

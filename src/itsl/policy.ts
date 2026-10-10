@@ -104,7 +104,9 @@ export const REVIEWED: Readonly<Record<string, 'read' | 'write'>> = {
 /**
  * cipp_graph_request allowlist. THIS IS THE KNOB: to let the model read more of
  * Microsoft Graph, add a collection prefix here (lower-case, no leading slash,
- * no version). A request path must equal a prefix or sit beneath it
+ * no version). NOTE: devicemanagement/deviceconfigurations is deliberately NOT
+ * listed: full GETs may return Wi-Fi/VPN preSharedKey values (unverified). Re-add
+ * it after a live check. A request path must equal a prefix or sit beneath it
  * (prefix + '/...'). Anything not listed is refused. The denylist below is
  * applied on top of the allowlist and always wins.
  */
@@ -127,7 +129,6 @@ export const GRAPH_ALLOWED_PREFIXES: readonly string[] = [
   'security/incidents',
   'devicemanagement/manageddevices',
   'devicemanagement/devicecompliancepolicies',
-  'devicemanagement/deviceconfigurations',
   'teams',
   'sites',
 ];
@@ -143,6 +144,8 @@ export const GRAPH_DENY_TERMS: readonly string[] = [
   'filevault',
   'getomasettingplaintextvalue',
   'secretreference',
+  'activationlockbypasscode',
+  'presharedkey',
   'temporaryaccesspass',
   'passwordmethod',
 ];
@@ -183,4 +186,41 @@ export const GRAPH_CONTENT_SEGMENTS: readonly string[] = [
   'photos',
   'extensions',
   'items',
+  'conversations',
+  'threads',
+  'posts',
+  'pages',
+  'canvaslayout',
+  'webparts',
+  'planner',
+  'todo',
+  'mailboxsettings',
+  'insights',
+  'onlinemeetings',
+  'shifts',
+  'schedule',
+  'notes',
+  'attachments',
+];
+
+/**
+ * Argument keys whose VALUES may contain '/' (free-text, filter and URL keys).
+ * Compared case-insensitively. Even for these keys `..`, `#`, backslash and
+ * control characters are refused, and `?`, `&` and `%` stay refused (RULING:
+ * conservative; the allowlist exempts only '/'). Add a key here after reviewing
+ * what CIPP does with it.
+ *  - filter, $filter, graphFilter: OData filter expressions
+ *  - search, query, searchstring: free-text search
+ *  - url, siteurl, weburl: SharePoint/site URLs
+ */
+export const VALUE_SLASH_ALLOWED_KEYS: readonly string[] = [
+  'filter',
+  '$filter',
+  'graphfilter',
+  'search',
+  'query',
+  'searchstring',
+  'url',
+  'siteurl',
+  'weburl',
 ];

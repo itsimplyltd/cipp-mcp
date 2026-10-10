@@ -4,6 +4,9 @@
 // parameter set and an allowlist of read collections (policy.ts). There is no
 // passthrough of arbitrary keys, so nextLink, manualPagination, AsApp, queue
 // overrides and case-variant spellings of Endpoint cannot reach CIPP.
+//
+// tenantFilter=AllTenants is accepted on purpose (N6): CIPP scopes the tenants a
+// user can reach by their CIPP role, so this costs load, not extra data.
 
 import { GRAPH_ALLOWED_PREFIXES, GRAPH_CONTENT_SEGMENTS, GRAPH_DENY_TERMS } from './policy.js';
 
@@ -14,26 +17,41 @@ export type GraphResult =
 const ALLOWED_KEYS = new Set(['tenantfilter', 'endpoint', '$select', '$filter', '$top', '$expand', 'version']);
 const MAX_VALUE_LENGTH = 1000;
 
+/** Segments after which a final `microsoft.graph.<type>` OData cast is accepted. */
+const CAST_PARENTS = new Set([
+  'memberof',
+  'transitivememberof',
+  'members',
+  'transitivemembers',
+  'owners',
+  'ownedobjects',
+  'registeredowners',
+  'registeredusers',
+]);
+const CAST_TYPES = /^microsoft\.graph\.(group|user|device|serviceprincipal|application|orgcontact|directoryrole)$/i;
+/** Exactly one usage-report function directly under reports/, with an exact period. */
+const REPORT_FUNCTION = /^reports\/(get[a-z0-9]+)\(period='(d7|d30|d90|d180)'\)$/i;
+/** ASCII only: no homoglyphs, no encoded forms. */
+const PATH_CHARS = /^[A-Za-z0-9._:,@$'/-]+$/;
+
 function denied(text: string): boolean {
   const lower = text.toLowerCase();
   return GRAPH_DENY_TERMS.some((t) => lower.includes(t));
 }
 
-function containsContentWord(text: string): boolean {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .some((w) => GRAPH_CONTENT_SEGMENTS.includes(w));
+function words(text: string): string[] {
+  return text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 
-/** Normalise and validate a Graph path. Returns the lower-case path (version prefix stripped) or a reason. */
+function containsContentWord(text: string): boolean {
+  return words(text).some((w) => GRAPH_CONTENT_SEGMENTS.includes(w));
+}
+
+/** Normalise and validate a Graph path. Returns the path (version prefix stripped) or a reason. */
 export function normaliseGraphPath(raw: unknown): { path: string; version: 'v1.0' | 'beta' } | { error: string } {
   if (typeof raw !== 'string') return { error: 'endpoint must be a string.' };
   let p = raw.trim();
   if (p === '' || p.length > 500) return { error: 'endpoint is empty or too long.' };
-  if (/[%?#()\\\s]/.test(p) || p.includes('..') || p.toLowerCase().includes('$batch')) {
-    return { error: 'endpoint contains a forbidden character or sequence.' };
-  }
   p = p.replace(/^\/+/, '');
   let version: 'v1.0' | 'beta' = 'v1.0';
   const vm = /^(v1\.0|beta)(\/|$)/i.exec(p);
@@ -43,18 +61,34 @@ export function normaliseGraphPath(raw: unknown): { path: string; version: 'v1.0
   }
   p = p.replace(/\/+$/, '');
   if (p === '' || p.includes('//')) return { error: 'endpoint is empty or malformed.' };
-  const segments = p.split('/');
-  for (const seg of segments) {
-    // Function and action shapes: microsoft.graph.xyz, getFooBar, anything with parentheses (rejected above).
-    if (/^microsoft\.graph\./i.test(seg) || /^get[A-Z]/.test(seg)) {
-      return { error: 'endpoint looks like a Graph function or action, which is not allowed.' };
+
+  // The one permitted use of parentheses: a usage-report function with an exact period.
+  const rf = REPORT_FUNCTION.exec(p);
+  if (rf) {
+    return { path: `reports/${rf[1]}(period='${rf[2]!.toUpperCase()}')`, version };
+  }
+
+  if (!PATH_CHARS.test(p)) {
+    return { error: "endpoint contains a forbidden character (only ASCII letters, digits and ._:,@$'/- are allowed)." };
+  }
+  if (p.includes('..') || p.toLowerCase().includes('$batch')) return { error: 'endpoint contains a forbidden sequence.' };
+
+  const segments = p.split('/').map((s) => s.toLowerCase());
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]!;
+    if (seg === '.') return { error: 'endpoint contains a "." segment.' };
+    if (seg.startsWith('microsoft.graph.')) {
+      const last = i === segments.length - 1;
+      if (last && i > 0 && CAST_PARENTS.has(segments[i - 1]!) && CAST_TYPES.test(seg)) continue;
+      return { error: 'endpoint looks like a Graph function, action or unsupported cast, which is not allowed.' };
     }
-    if (seg.toLowerCase() === 'authentication') return { error: 'authentication methods are not readable here.' };
-    if (GRAPH_CONTENT_SEGMENTS.includes(seg.toLowerCase())) {
+    if (/^get[a-z]/.test(seg)) return { error: 'endpoint looks like a Graph function or action, which is not allowed.' };
+    if (seg === 'authentication') return { error: 'authentication methods are not readable here.' };
+    if (GRAPH_CONTENT_SEGMENTS.includes(seg)) {
       return { error: 'customer content (mail, calendar, files, chats, notes, contacts, photos, list items) is not readable here.' };
     }
   }
-  const lower = p.toLowerCase();
+  const lower = segments.join('/');
   if (denied(lower)) return { error: 'endpoint touches a protected resource.' };
   const allowed = GRAPH_ALLOWED_PREFIXES.some((pre) => lower === pre || lower.startsWith(pre + '/'));
   if (!allowed) {
@@ -86,8 +120,8 @@ export function buildGraphRequest(args: Record<string, unknown>): GraphResult {
     version = v;
   }
 
-  const params: Record<string, unknown> = { tenantFilter: tenant, Endpoint: norm.path };
-  if (version === 'beta') params['Version'] = 'beta';
+  // Always explicit: CIPP defaults to beta when Version is absent (N5).
+  const params: Record<string, unknown> = { tenantFilter: tenant, Endpoint: norm.path, Version: version };
   for (const key of ['$select', '$filter', '$expand']) {
     if (!byKey.has(key)) continue;
     const v = byKey.get(key);
@@ -95,8 +129,10 @@ export function buildGraphRequest(args: Record<string, unknown>): GraphResult {
     if (typeof v !== 'string' || v.length > MAX_VALUE_LENGTH || /[\u0000-\u001f]/.test(v)) {
       return { ok: false, reason: `${key} must be a short string.` };
     }
+    // Whole-word matches only for `authentication` ('authenticationMethods' is a different word).
+    const touchesAuth = words(v).includes('authentication');
     const touchesContent = key !== '$filter' && containsContentWord(v);
-    if (denied(v) || touchesContent || /authentication/i.test(v) || v.includes('%')) {
+    if (denied(v) || touchesContent || touchesAuth || v.includes('%')) {
       return { ok: false, reason: `${key} touches a protected resource.` };
     }
     params[key] = v;
