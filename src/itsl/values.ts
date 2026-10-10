@@ -15,8 +15,8 @@ const MAX_DEPTH = 8;
 
 /** Keys whose value must be a SharePoint https URL (R1): any key ending in "url". */
 const URL_KEY_RE = /url$/i;
-/** Keys that may carry a guest-user `#EXT#` marker besides the filter keys. */
-const EXT_KEY_RE = /(user|upn|id)$/i;
+/** In filter/search keys, an `&` that starts a query-option shape (`&$select=`, `&x=`) is refused. */
+const QUERY_OPTION_AFTER_AMP = /&\s*[$A-Za-z0-9_.-]+\s*=/;
 const SHAREPOINT_URL_RE = /^https:\/\/[a-z0-9-]+(-my|-admin)?\.sharepoint\.com(\/[A-Za-z0-9._~\-/ ]*)?$/i;
 
 const SLASH_KEYS = new Set(VALUE_SLASH_ALLOWED_KEYS.map((k) => k.toLowerCase()));
@@ -26,9 +26,8 @@ const FILTER_KEYS = new Set(VALUE_FILTER_KEYS.map((k) => k.toLowerCase()));
  * Returns an error message naming the offending key, or undefined when every
  * value is acceptable.
  *  - everywhere: no `..`, backslash, control characters, `?`, `%`
- *  - `#`: refused, except the exact token `#EXT#` (case-insensitive) in filter/search
- *    keys and in keys ending user/upn/id
- *  - `&`: only in filter/search keys
+ *  - `#`: refused, except the exact token `#EXT#` (case-insensitive) in filter/search keys only
+ *  - `&`: only in filter/search keys, and not when it starts a query-option shape (`&name=`)
  *  - `/`: only in filter/search keys (VALUE_SLASH_ALLOWED_KEYS) and `extraSlashKeys`
  *  - keys ending "url": the value must be an https SharePoint URL
  * The `&`, `/` and `#EXT#` allowances apply ONLY to top-level string values (the
@@ -92,14 +91,13 @@ function checkString(value: string, key: string, top: boolean, extra: readonly s
   if (CONTROL_RE.test(value)) return bad('a control character');
 
   const isFilter = top && FILTER_KEYS.has(lk);
-  const extOk = top && (isFilter || EXT_KEY_RE.test(key));
-  const rest = extOk ? value.replace(/#EXT#/gi, '') : value;
+  const rest = isFilter ? value.replace(/#EXT#/gi, '') : value;
   if (rest.includes('#')) return bad("'#'");
 
   const slashOk = top && (SLASH_KEYS.has(lk) || extra.some((k) => k.toLowerCase() === lk));
   if (!slashOk && value.includes('/')) return bad("'/'");
   if (value.includes('?')) return bad("'?'");
-  if (!isFilter && value.includes('&')) return bad("'&'");
+  if (value.includes('&') && (!isFilter || QUERY_OPTION_AFTER_AMP.test(value))) return bad("'&'");
   if (value.includes('%')) return bad("'%'");
   return undefined;
 }

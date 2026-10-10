@@ -73,27 +73,44 @@ describe('"&" is allowed in filter/search-type keys only', () => {
   });
 });
 
-describe('#EXT# is allowed for filter/search keys and keys ending user/upn/id; any other # is refused', () => {
+describe('R5: #EXT# only in filter/search keys', () => {
   const GUEST = 'jane_contoso.com#EXT#@itsimply.onmicrosoft.com';
-  it('a guest UPN passes in those keys, case-insensitively', () => {
-    for (const k of ['UserID', 'userId', 'upn', 'DeviceID', 'user', 'filter', '$filter', 'search', 'graphFilter']) {
-      expect(v({ [k]: GUEST })).toBeUndefined();
-    }
-    expect(v({ UserID: GUEST.replace('#EXT#', '#ext#') })).toBeUndefined();
+  it('a guest UPN passes in filter/search keys, case-insensitively', () => {
+    for (const k of ['filter', '$filter', 'search', 'graphFilter', 'query', 'searchString']) expect(v({ [k]: GUEST })).toBeUndefined();
+    expect(v({ $filter: GUEST.replace('#EXT#', '#ext#') })).toBeUndefined();
+  });
+  it('it is refused as a user/upn/id value and in every other key', () => {
+    for (const k of ['UserID', 'userId', 'upn', 'DeviceID', 'user', 'tenantFilter', 'name', 'report']) expect(v({ [k]: GUEST })).toMatch(/'#'/);
   });
   it('any other # fails, even beside #EXT#', () => {
-    for (const k of ['UserID', 'filter', 'upn']) {
+    for (const k of ['filter', 'search']) {
       expect(v({ [k]: 'abc#x' })).toMatch(/'#'/);
       expect(v({ [k]: GUEST + '#' })).toMatch(/'#'/);
       expect(v({ [k]: '#EXT' })).toMatch(/'#'/);
     }
   });
-  it('#EXT# is refused in other keys', () => {
-    for (const k of ['tenantFilter', 'name', 'report', 'Type']) expect(v({ [k]: GUEST })).toMatch(/'#'/);
-  });
   it('#EXT# does not rescue other bad characters', () => {
-    expect(v({ UserID: '../x#EXT#' })).toMatch(/'\.\.'/);
-    expect(v({ UserID: 'a/b#EXT#' })).toMatch(/'\/'/);
+    expect(v({ filter: '../x#EXT#' })).toMatch(/'..'/);
+    expect(v({ filter: 'a?b#EXT#' })).toMatch(/'?'/);
+  });
+});
+
+describe('R4: query-option smuggling after & in filter/search keys', () => {
+  it.each([
+    "a&$select=activationLockBypassCode",
+    "a&$expand=messages",
+    "a & $select = x",
+    "x&$filter=y",
+    "x&select=id",
+    "x&Endpoint=users",
+    "x&  $top=5",
+    "x&a.b-c_d=1",
+  ])('refuses %s', (val) => {
+    for (const k of ['filter', '$filter', 'graphFilter', 'search', 'query', 'searchString']) expect(v({ [k]: val })).toMatch(/'&'/);
+  });
+  it.each(['R&D', 'AT & T', 'Smith & Sons Ltd', 'a&', 'a& b', '&', 'x&y z'])('plain text %s is still allowed', (val) => {
+    expect(v({ filter: val })).toBeUndefined();
+    expect(v({ search: val })).toBeUndefined();
   });
 });
 
