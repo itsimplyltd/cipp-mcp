@@ -1,4 +1,4 @@
-FROM node:26-alpine AS builder
+FROM node:26-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS builder
 
 ARG VERSION="unknown"
 ARG COMMIT_SHA="unknown"
@@ -15,7 +15,7 @@ COPY . .
 
 RUN npm run build
 
-FROM node:26-alpine AS production
+FROM node:26-alpine@sha256:143494b1da2945f061539253adc65e4f1569ddf07da2d384c022c791a9d90a4a AS production
 
 # Pull latest Alpine package fixes (e.g. OpenSSL) even when the base layer is cached
 RUN apk -U upgrade --no-cache
