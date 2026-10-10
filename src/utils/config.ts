@@ -1,3 +1,4 @@
+// Modified by IT Simply Ltd, 2026: x-user-token header (per-user bearer) parsed in gateway mode
 // Configuration Utility
 // Handles loading configuration from environment variables and MCP client arguments.
 // Supports gateway mode where credentials come via HTTP request headers.
@@ -86,6 +87,12 @@ export interface GatewayCredentials {
   tokenScopeFallback?: boolean;
   /** Optional token endpoint URL override. Maps from `X_TOKEN_URL` / `x-token-url`. */
   tokenUrl: string | undefined;
+  /**
+   * IT Simply: the calling user's own CIPP token, from the `x-user-token`
+   * header. When present it is the only credential used (it becomes `apiKey`)
+   * and every other credential is dropped. Never log it.
+   */
+  userToken?: string;
 }
 
 /**
@@ -206,6 +213,24 @@ export function parseCredentialsFromHeaders(
     const value = headers[name] || headers[name.toLowerCase()];
     return Array.isArray(value) ? value[0] : value;
   };
+
+  // IT Simply: per-user token mode. x-user-token wins over x-api-key and the
+  // client-credential headers, which are ignored when it is present.
+  const userToken = cleanCredential(getHeader('x-user-token')?.replace(/^\s*Bearer\s+/i, ''));
+  if (userToken) {
+    return {
+      ...sanitizeCredentials({
+        apiKey: userToken,
+        baseUrl: getHeader('x-base-url'),
+        tenantId: undefined,
+        clientId: undefined,
+        clientSecret: undefined,
+        tokenScope: undefined,
+        tokenUrl: undefined,
+      }),
+      userToken,
+    };
+  }
 
   return sanitizeCredentials({
     apiKey: getHeader('x-api-key'),

@@ -1,3 +1,4 @@
+// Modified by IT Simply Ltd, 2026: S2S v2 (signed tier/user), x-user-token mode, per-request tier context, tiered server instructions
 // CIPP MCP Server
 // Handles the Model Context Protocol server setup and integration with CIPP.
 // Supports both local (env-based) and gateway (header-based) credential modes.
@@ -16,12 +17,19 @@ import { McpServerConfig } from '../types/index.js';
 import { EnvironmentConfig, parseCredentialsFromHeaders } from '../utils/config.js';
 import { CippToolHandler } from '../handlers/tool.handler.js';
 import { verifyS2sHeader, S2S_HEADER } from '../s2s-verify.js';
+import { decideS2s, TIER_HEADER, USER_HEADER } from '../itsl/s2s-v2.js';
+import { ToolContext } from '../itsl/meta-tools.js';
 
 // Conduit service-to-service auth (gateway#377 parity). Non-empty =
 // enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
 // exactly as before (dark-by-default until the gateway provisions this
 // container's derived subkey). See src/s2s-verify.ts.
-const S2S_SECRET = process.env.CONDUIT_S2S_SECRET || '';
+// IT Simply: read per request (not at import) so the policy below can be
+// exercised under test; production sets it once at container start.
+const s2sSecret = (): string => process.env.CONDUIT_S2S_SECRET || '';
+const envFlag = (name: string): boolean => (process.env[name] || '').trim().toLowerCase() === 'true';
+
+const headerValue = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
 
 export class CippMcpServer {
   private server: Server;
@@ -87,7 +95,26 @@ CIPP MCP Server — M365 multi-tenant management platform for MSPs.
 Use tenantFilter to scope operations to a specific tenant domain (e.g. "contoso.com").
 Most listing tools accept 'allTenants' as tenantFilter to query across every managed tenant.
 
-This server is read-only: it cannot create, change or delete anything in a tenant.
+Access is tiered. Every CIPP endpoint is read, write, disabled or blocked:
+- read: callable by everyone. This is almost all of CIPP's read surface.
+- write: callable only with the CIPP.Write gateway role. At launch this is only the cache and sync
+  triggers (ExecCIPPDBCache, ExecSyncAPDevices, ExecSyncDEP, ExecSyncVPP, ExecExtensionSync,
+  ExecTestRefresh, ExecTestRun).
+- disabled: everything else that can change data, until IT Simply reviews it. Refused for everyone.
+- blocked: sensitive or dangerous endpoints (LAPS passwords, BitLocker keys, MFA push, secrets and
+  settings). Refused for everyone.
+CIPP also applies your own CIPP role on top, so a write-tier call can still be refused by CIPP.
+A refusal names its reason; do not retry with a different spelling. tools/list only shows tools
+your tier can call.
+
+To reach any CIPP endpoint, use the catalogue tools:
+- cipp_search_tools: find endpoints you can call (search by keyword or browse a category)
+- cipp_get_tool_info: input schema for named endpoints
+- cipp_exec_tool: run an endpoint by name with 'arguments'
+- cipp_graph_request: read-only Microsoft Graph query for a tenant through CIPP
+
+Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
+Named tools that can change data are listed only when your tier allows them, and are disabled at launch.
 
 Tool categories:
 - Tenants: list and inspect managed tenants
@@ -175,7 +202,18 @@ Tool categories:
         // BEFORE any credential extraction (OAuth or static key), mirroring
         // every other ported wrapper (e.g.
         // containers/sentinelone-mcp/gateway_wrapper.py).
-        if (S2S_SECRET && !verifyS2sHeader(req.headers[S2S_HEADER] as string | undefined, S2S_SECRET)) {
+        // IT Simply: the decision also yields the caller's tier and user, which
+        // are trusted ONLY from a verified v2 signature (see src/itsl/s2s-v2.ts).
+        const s2s = decideS2s({
+          header: headerValue(req.headers[S2S_HEADER]),
+          secret: s2sSecret(),
+          requireV2: envFlag('ITSL_REQUIRE_S2S_V2'),
+          tierHeader: headerValue(req.headers[TIER_HEADER]),
+          userHeader: headerValue(req.headers[USER_HEADER]),
+          verifyV1: verifyS2sHeader,
+        });
+        if (!s2s.ok) {
+          this.logger.warn('S2S check failed', { reason: s2s.reason });
           res.writeHead(401, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
@@ -184,6 +222,7 @@ Tool categories:
           );
           return;
         }
+        const toolContext: ToolContext = { tier: s2s.tier, user: s2s.user };
 
         if (req.method !== 'POST') {
           res.writeHead(405, { 'Content-Type': 'application/json' });
@@ -197,8 +236,28 @@ Tool categories:
           return;
         }
 
-        let toolHandler = this.toolHandler;
+        // IT Simply: with ITSL_REQUIRE_USER_TOKEN=true the per-user token is the
+        // only accepted credential. Checked before any credential parsing, so a
+        // request carrying client credentials but no x-user-token is refused.
+        if (envFlag('ITSL_REQUIRE_USER_TOKEN')) {
+          const hasUserToken = !!headerValue(req.headers['x-user-token'])?.trim();
+          if (!hasUserToken || !isGatewayMode) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                error: 'Missing credentials',
+                message: isGatewayMode
+                  ? 'This server only accepts a per-user token in x-user-token.'
+                  : 'ITSL_REQUIRE_USER_TOKEN requires AUTH_MODE=gateway.',
+              })
+            );
+            return;
+          }
+        }
+
+        // Per-request handler so the caller's verified tier travels with the call.
         let cippService = this.cippService;
+        let toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
 
         if (isGatewayMode) {
           const credentials = parseCredentialsFromHeaders(
@@ -220,8 +279,8 @@ Tool categories:
               JSON.stringify({
                 error: 'Missing credentials',
                 message:
-                  'Gateway mode requires x-base-url plus either x-api-key or (x-tenant-id + x-client-id + x-client-secret)',
-                required: ['x-base-url', 'x-api-key OR (x-tenant-id + x-client-id + x-client-secret)'],
+                  'Gateway mode requires x-base-url plus either x-user-token, x-api-key or (x-tenant-id + x-client-id + x-client-secret)',
+                required: ['x-base-url', 'x-user-token OR x-api-key OR (x-tenant-id + x-client-id + x-client-secret)'],
               })
             );
             return;
@@ -247,7 +306,7 @@ Tool categories:
           };
 
           cippService = new CippService(requestConfig, this.logger);
-          toolHandler = new CippToolHandler(cippService, this.logger);
+          toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
         }
 
         const server = new Server(

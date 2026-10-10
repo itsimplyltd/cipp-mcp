@@ -1,3 +1,4 @@
+// Modified by IT Simply Ltd, 2026: every tool call is tier-checked in handleToolCall; tools/list is filtered by tier; catalogue meta-tools added
 // CIPP Tool Handler
 // Dispatches MCP tool calls to the correct CippService method.
 
@@ -6,6 +7,14 @@ import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
 import { TOOL_DEFINITIONS } from '../mcp/tool.definitions.js';
+import {
+  DEFAULT_CONTEXT,
+  isMetaTool,
+  META_TOOL_DEFINITIONS,
+  namedToolDecision,
+  runMetaTool,
+  ToolContext,
+} from '../itsl/meta-tools.js';
 
 export interface McpToolResult {
   content: Array<{ type: string; text: string }>;
@@ -17,9 +26,12 @@ export class CippToolHandler {
   private logger: Logger;
   private mcpServer: Server | null = null;
 
-  constructor(cippService: CippService, logger: Logger) {
+  private context: ToolContext;
+
+  constructor(cippService: CippService, logger: Logger, context: ToolContext = DEFAULT_CONTEXT) {
     this.cippService = cippService;
     this.logger = logger;
+    this.context = context;
   }
 
   setServer(server: Server): void {
@@ -30,12 +42,38 @@ export class CippToolHandler {
     return this.mcpServer;
   }
 
+  /** Tools this caller may run: named tools filtered by tier, plus the catalogue meta-tools. */
   getToolDefinitions() {
-    return TOOL_DEFINITIONS;
+    const named = TOOL_DEFINITIONS.filter((t) => namedToolDecision(t.name, this.context)?.allowed === true);
+    return [...named, ...META_TOOL_DEFINITIONS];
   }
 
   async handleToolCall(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
     this.logger.debug(`Dispatching tool call: ${name}`, { args });
+
+    // IT Simply tier gate. This is the single path every tool call takes, so
+    // nothing below (the switch) can run for a tool the caller's tier forbids.
+    if (isMetaTool(name)) {
+      return runMetaTool(name, args, {
+        service: this.cippService,
+        logger: this.logger,
+        ctx: this.context,
+      });
+    }
+    const decision = namedToolDecision(name, this.context);
+    if (!decision) {
+      // Not a known tool: refuse before the switch so an unmapped case can never run.
+      throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+    }
+    if (!decision.allowed) {
+      this.logger.warn('CIPP tool call refused', {
+        tool: name,
+        targetTier: decision.tier,
+        callerTier: this.context.tier,
+        user: this.context.user,
+      });
+      return { content: [{ type: 'text', text: decision.reason }], isError: true };
+    }
 
     try {
       let result: unknown;
