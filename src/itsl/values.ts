@@ -10,7 +10,7 @@ import { VALUE_SLASH_ALLOWED_KEYS } from './policy.js';
 
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
-const KEY_RE = /^[A-Za-z0-9_$.\-]{1,100}$/;
+const KEY_RE = /^[A-Za-z0-9_$.-]{1,100}$/;
 const MAX_DEPTH = 8;
 
 const SLASH_KEYS = new Set(VALUE_SLASH_ALLOWED_KEYS.map((k) => k.toLowerCase()));
