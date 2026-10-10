@@ -1,0 +1,587 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hand-made test fixture, not CIPP",
+    "version": "test"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "parameters": {
+      "tenantFilter": {
+        "name": "tenantFilter",
+        "in": "query",
+        "required": true,
+        "description": "Target tenant",
+        "schema": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/ListThings": {
+      "get": {
+        "summary": "List things",
+        "operationId": "List things",
+        "tags": [
+          "Identity > Administration > Users"
+        ],
+        "description": "List things description",
+        "x-cipp-role": "Identity.User.Read",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/tenantFilter"
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "A user id"
+          }
+        ]
+      }
+    },
+    "/api/ListPairs": {
+      "get": {
+        "summary": "List pairs (get)",
+        "operationId": "List pairs (get)",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "List pairs (get) description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      },
+      "post": {
+        "summary": "List pairs",
+        "operationId": "List pairs",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "List pairs description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": [
+          {
+            "name": "AllTenantSelector",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filter": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ListMixed": {
+      "get": {
+        "summary": "Mixed get",
+        "operationId": "Mixed get",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Mixed get description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      },
+      "post": {
+        "summary": "Mixed post",
+        "operationId": "Mixed post",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Mixed post description",
+        "x-cipp-role": "CIPP.Core.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ListSneakyReadWrite": {
+      "get": {
+        "summary": "Sneaky",
+        "operationId": "Sneaky",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Sneaky description",
+        "x-cipp-role": "Identity.User.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/AddTestReport": {
+      "post": {
+        "summary": "Add test report",
+        "operationId": "Add test report",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Add test report description",
+        "x-cipp-role": "Tenant.Tests.Read",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "a": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/RemoveThing": {
+      "post": {
+        "summary": "Remove thing",
+        "operationId": "Remove thing",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Remove thing description",
+        "x-cipp-role": "Identity.User.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListNoRole": {
+      "get": {
+        "summary": "No role",
+        "operationId": "No role",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "No role description",
+        "parameters": []
+      }
+    },
+    "/api/ExecGetLocalAdminPassword": {
+      "post": {
+        "summary": "ExecGetLocalAdminPassword",
+        "operationId": "ExecGetLocalAdminPassword",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecGetLocalAdminPassword description",
+        "x-cipp-role": "Endpoint.Device.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecGetRecoveryKey": {
+      "post": {
+        "summary": "ExecGetRecoveryKey",
+        "operationId": "ExecGetRecoveryKey",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecGetRecoveryKey description",
+        "x-cipp-role": "Endpoint.Device.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecSendPush": {
+      "post": {
+        "summary": "ExecSendPush",
+        "operationId": "ExecSendPush",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecSendPush description",
+        "x-cipp-role": "Identity.User.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecMailTest": {
+      "post": {
+        "summary": "ExecMailTest",
+        "operationId": "ExecMailTest",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecMailTest description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecBreachSearch": {
+      "post": {
+        "summary": "ExecBreachSearch",
+        "operationId": "ExecBreachSearch",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecBreachSearch description",
+        "x-cipp-role": "CIPP.BreachLookup.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecBitlockerSearch": {
+      "post": {
+        "summary": "ExecBitlockerSearch",
+        "operationId": "ExecBitlockerSearch",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecBitlockerSearch description",
+        "x-cipp-role": "Endpoint.Device.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecCPVRefresh": {
+      "post": {
+        "summary": "ExecCPVRefresh",
+        "operationId": "ExecCPVRefresh",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecCPVRefresh description",
+        "x-cipp-role": "CIPP.Core.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecStandardsRun": {
+      "post": {
+        "summary": "ExecStandardsRun",
+        "operationId": "ExecStandardsRun",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecStandardsRun description",
+        "x-cipp-role": "Tenant.Standards.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecCIPPDBCacheAdmin": {
+      "post": {
+        "summary": "ExecCIPPDBCacheAdmin",
+        "operationId": "ExecCIPPDBCacheAdmin",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecCIPPDBCacheAdmin description",
+        "x-cipp-role": "CIPP.SuperAdmin.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecMcp": {
+      "post": {
+        "summary": "ExecMcp",
+        "operationId": "ExecMcp",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecMcp description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListOpenApiSpec": {
+      "post": {
+        "summary": "ListOpenApiSpec",
+        "operationId": "ListOpenApiSpec",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListOpenApiSpec description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListCippDocs": {
+      "post": {
+        "summary": "ListCippDocs",
+        "operationId": "ListCippDocs",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListCippDocs description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListExtensionsConfig": {
+      "post": {
+        "summary": "ListExtensionsConfig",
+        "operationId": "ListExtensionsConfig",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListExtensionsConfig description",
+        "x-cipp-role": "CIPP.Extension.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListGraphBulkRequest": {
+      "post": {
+        "summary": "ListGraphBulkRequest",
+        "operationId": "ListGraphBulkRequest",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ListGraphBulkRequest description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListSuperThing": {
+      "get": {
+        "summary": "Super",
+        "operationId": "Super",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Super description",
+        "x-cipp-role": "CIPP.SuperAdmin.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListAppSettingThing": {
+      "get": {
+        "summary": "App settings",
+        "operationId": "App settings",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "App settings description",
+        "x-cipp-role": "CIPP.AppSettings.Read",
+        "parameters": []
+      }
+    },
+    "/api/ListExtensionStatus": {
+      "get": {
+        "summary": "Extension status",
+        "operationId": "Extension status",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Extension status description",
+        "x-cipp-role": "CIPP.Extension.Read",
+        "parameters": []
+      }
+    },
+    "/api/ExecAppSettingWrite": {
+      "post": {
+        "summary": "App settings write",
+        "operationId": "App settings write",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "App settings write description",
+        "x-cipp-role": "CIPP.AppSettings.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecCIPPDBCache": {
+      "post": {
+        "summary": "ExecCIPPDBCache",
+        "operationId": "ExecCIPPDBCache",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecCIPPDBCache description",
+        "x-cipp-role": "CIPP.Core.ReadWrite",
+        "parameters": [
+          {
+            "name": "Name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/tenantFilter"
+          },
+          {
+            "name": "Types",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ExecSyncAPDevices": {
+      "post": {
+        "summary": "ExecSyncAPDevices",
+        "operationId": "ExecSyncAPDevices",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecSyncAPDevices description",
+        "x-cipp-role": "Endpoint.Autopilot.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecSyncDEP": {
+      "post": {
+        "summary": "ExecSyncDEP",
+        "operationId": "ExecSyncDEP",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecSyncDEP description",
+        "x-cipp-role": "Endpoint.MEM.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecSyncVPP": {
+      "post": {
+        "summary": "ExecSyncVPP",
+        "operationId": "ExecSyncVPP",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecSyncVPP description",
+        "x-cipp-role": "Endpoint.Application.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecExtensionSync": {
+      "post": {
+        "summary": "ExecExtensionSync",
+        "operationId": "ExecExtensionSync",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecExtensionSync description",
+        "x-cipp-role": "CIPP.Extension.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecTestRefresh": {
+      "post": {
+        "summary": "ExecTestRefresh",
+        "operationId": "ExecTestRefresh",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecTestRefresh description",
+        "x-cipp-role": "Tenant.Tests.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecTestRun": {
+      "post": {
+        "summary": "ExecTestRun",
+        "operationId": "ExecTestRun",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "ExecTestRun description",
+        "x-cipp-role": "Tenant.Tests.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecBaselineRun": {
+      "post": {
+        "summary": "Run baseline",
+        "operationId": "Run baseline",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Run baseline description",
+        "x-cipp-role": "Tenant.BaselinesRun.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ExecDisableUser": {
+      "post": {
+        "summary": "Disable user",
+        "operationId": "Disable user",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Disable user description",
+        "x-cipp-role": "Identity.User.ReadWrite",
+        "parameters": []
+      }
+    },
+    "/api/ListGraphRequest": {
+      "get": {
+        "summary": "Graph request",
+        "operationId": "Graph request",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Graph request description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": [
+          {
+            "name": "Endpoint",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/tenantFilter"
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/GetVersion": {
+      "get": {
+        "summary": "Version",
+        "operationId": "Version",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Version description",
+        "x-cipp-role": "CIPP.Core.Read",
+        "parameters": []
+      }
+    },
+    "/api/PublicPing": {
+      "get": {
+        "summary": "Ping",
+        "operationId": "Ping",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Ping description",
+        "x-cipp-role": "Public",
+        "parameters": []
+      }
+    }
+  }
+}

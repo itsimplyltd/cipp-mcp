@@ -8,3 +8,7 @@ coverage/
 
 # Claude Code local runtime artifacts
 .claude/
+
+# CIPP-API is AGPL-3.0; never commit its spec
+openapi.json
+openapi.enriched.json
