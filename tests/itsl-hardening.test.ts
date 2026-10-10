@@ -85,10 +85,10 @@ describe('a) Graph content subpaths are refused under every allowed collection',
   });
 
   it('content words are refused as whole words in $select and $expand', () => {
-    for (const bad of [{ $expand: 'messages' }, { $expand: 'calendar($select=id)' }, { $select: 'drive' }, { $expand: 'Events' }, { $expand: 'extensions' }]) {
+    for (const bad of [{ expand: 'messages' }, { expand: 'calendar($select=id)' }, { select: 'drive' }, { expand: 'Events' }, { expand: 'extensions' }]) {
       expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', ...bad }).ok).toBe(false);
     }
-    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', $expand: 'manager', $select: 'id,displayName' }).ok).toBe(true);
+    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', expand: 'manager', select: 'id,displayName' }).ok).toBe(true);
   });
 
   it('cipp_graph_request never reaches CIPP for a content path', async () => {

@@ -50,7 +50,7 @@ describe('R1: keys ending "url" must be an https SharePoint URL', () => {
 describe('allowances are top-level only', () => {
   it('"/" in a filter key is fine at top level and in exec arguments, refused when nested', () => {
     expect(v({ filter: 'a/b' })).toBeUndefined();
-    expect(v({ name: 'X', arguments: { $filter: 'a/b' } })).toBeUndefined();
+    expect(v({ name: 'X', arguments: { filter: 'a/b' } })).toBeUndefined();
     expect(v({ UserID: { siteurl: 'x/y' } })).toMatch(/siteurl/);
     expect(v({ UserID: { filter: 'x/y' } })).toMatch(/filter/);
     expect(v({ name: 'X', arguments: { q: { filter: 'a/b' } } })).toMatch(/filter/);
@@ -77,7 +77,7 @@ describe('R5: #EXT# only in filter/search keys', () => {
   const GUEST = 'jane_contoso.com#EXT#@itsimply.onmicrosoft.com';
   it('a guest UPN passes in filter/search keys, case-insensitively', () => {
     for (const k of ['filter', '$filter', 'search', 'graphFilter', 'query', 'searchString']) expect(v({ [k]: GUEST })).toBeUndefined();
-    expect(v({ $filter: GUEST.replace('#EXT#', '#ext#') })).toBeUndefined();
+    expect(v({ filter: GUEST.replace('#EXT#', '#ext#') })).toBeUndefined();
   });
   it('it is refused as a user/upn/id value and in every other key', () => {
     for (const k of ['UserID', 'userId', 'upn', 'DeviceID', 'user', 'tenantFilter', 'name', 'report']) expect(v({ [k]: GUEST })).toMatch(/'#'/);
@@ -117,9 +117,9 @@ describe('R4: query-option smuggling after & in filter/search keys', () => {
 describe('cipp_graph_request $format', () => {
   const base = { tenantFilter: 't', endpoint: 'users' };
   it('accepts exactly application/json and forwards it', () => {
-    expect(buildGraphRequest({ ...base, $format: 'application/json' })).toMatchObject({ ok: true, params: { $format: 'application/json' } });
+    expect(buildGraphRequest({ ...base, format: 'application/json' })).toMatchObject({ ok: true, params: { $format: 'application/json' } });
   });
   it.each(['application/xml', 'application/JSON', 'json', '', 'application/json;x=1', 5, null])('refuses %j', (f) => {
-    expect(buildGraphRequest({ ...base, $format: f }).ok).toBe(false);
+    expect(buildGraphRequest({ ...base, format: f }).ok).toBe(false);
   });
 });

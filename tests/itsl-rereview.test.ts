@@ -107,7 +107,7 @@ describe('N1: argument value validation, centrally, before dispatch', () => {
   });
 
   it('applies to cipp_graph_request arguments other than endpoint', async () => {
-    const res = await handler().handleToolCall('cipp_graph_request', { tenantFilter: 'x', endpoint: 'users', $filter: 'a#b' });
+    const res = await handler().handleToolCall('cipp_graph_request', { tenantFilter: 'x', endpoint: 'users', filter: 'a#b' });
     expect(res.isError).toBe(true);
     expect(cippCalls()).toEqual([]);
   });
@@ -126,9 +126,9 @@ describe('N2: new deny terms; deviceConfigurations removed from the allowlist', 
   it('refuses activationLockBypassCode and preSharedKey in path, $select and $expand', () => {
     expect('error' in normaliseGraphPath('deviceManagement/managedDevices/abc/activationLockBypassCode')).toBe(true);
     for (const t of ['activationLockBypassCode', 'preSharedKey']) {
-      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', $select: t }).ok).toBe(false);
-      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', $expand: t }).ok).toBe(false);
-      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', $filter: `x eq '${t}'` }).ok).toBe(false);
+      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', select: t }).ok).toBe(false);
+      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', expand: t }).ok).toBe(false);
+      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'devices', filter: `x eq '${t}'` }).ok).toBe(false);
     }
   });
 
@@ -162,7 +162,7 @@ describe('N3: more content segments', () => {
 
   it('refuses the same words as whole words in $select and $expand', () => {
     for (const w of ['canvasLayout', 'webParts', 'conversations', 'mailboxSettings', 'onlineMeetings', 'attachments', 'planner']) {
-      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', $expand: w }).ok).toBe(false);
+      expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', expand: w }).ok).toBe(false);
     }
   });
 });
@@ -259,11 +259,11 @@ describe('regression fixes: reports functions and OData casts', () => {
   });
 
   it('"authentication" is a whole-word match in $select/$expand; drives stays denied', () => {
-    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', $select: 'id,authenticationMethodsPolicy' }).ok).toBe(true);
-    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', $expand: 'authentication' }).ok).toBe(false);
-    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', $expand: 'authentication($select=id)' }).ok).toBe(false);
+    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', select: 'id,authenticationMethodsPolicy' }).ok).toBe(true);
+    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', expand: 'authentication' }).ok).toBe(false);
+    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'users', expand: 'authentication($select=id)' }).ok).toBe(false);
     expect('error' in normaliseGraphPath('sites/s/drives')).toBe(true);
-    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'sites', $select: 'drives' }).ok).toBe(false);
+    expect(buildGraphRequest({ tenantFilter: 't', endpoint: 'sites', select: 'drives' }).ok).toBe(false);
   });
 
   it('cipp_bec_check and cipp_list_scheduled_items stay disabled', async () => {

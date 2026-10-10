@@ -110,19 +110,17 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
   {
     name: 'cipp_graph_request',
     description:
-      "Run a read-only Microsoft Graph GET against a tenant through CIPP (ListGraphRequest). Provide the tenant and a Graph path under an allowed collection (users, groups, devices, servicePrincipals, applications, domains, organization, subscribedSkus, directoryRoles, roleManagement/directory, identity/conditionalAccess, policies, auditLogs, reports, security/alerts_v2, security/incidents, deviceManagement/managedDevices|deviceCompliancePolicies|deviceConfigurations, teams, sites), plus optional $select, $filter, $top, $expand. Functions, actions, secrets and authentication methods are refused.",
+      "Run a read-only Microsoft Graph GET against a tenant through CIPP (ListGraphRequest). Provide the tenant and a Graph path under an allowed collection (users, groups, devices, servicePrincipals, applications, domains, organization, subscribedSkus, directoryRoles, roleManagement/directory, identity/conditionalAccess, policies, auditLogs, reports, security/alerts_v2, security/incidents, deviceManagement/managedDevices|deviceCompliancePolicies|deviceConfigurations, teams, sites), plus optional select, filter, top, expand (the OData options, written without the $). Functions, actions, secrets and authentication methods are refused.",
     inputSchema: {
       type: 'object',
       properties: {
         tenantFilter: { type: 'string', description: "Tenant domain or ID, or 'AllTenants'." },
         endpoint: { type: 'string', description: "Graph path, e.g. 'users' or 'security/alerts_v2'." },
-        $select: { type: 'string' },
-        $filter: { type: 'string' },
-        $top: { type: 'number' },
-        $expand: { type: 'string' },
-        $orderby: { type: 'string' },
-        $search: { type: 'string' },
-        $count: { type: 'boolean' },
+        select: { type: 'string', description: 'OData $select.' },
+        filter: { type: 'string', description: 'OData $filter.' },
+        top: { type: 'number', description: 'OData $top, 1 to 999.' },
+        expand: { type: 'string', description: 'OData $expand.' },
+        format: { type: 'string', description: "OData $format; only 'application/json'." },
         Version: { type: 'string', description: "'v1.0' (default) or 'beta'." },
       },
       required: ['tenantFilter', 'endpoint'],
@@ -271,6 +269,10 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       const canon = canonicaliseArguments(entry, (callArgs ?? {}) as Record<string, unknown>);
       if (!canon.ok) return text(`Refused: ${canon.reason}`, true);
       const finalArgs = canon.args;
+      if (want === 'write' && hasAllTenants(finalArgs)) {
+        logRefusal(deps, name, entry.name, tier);
+        return text('Refused: AllTenants is not allowed on write-tier calls - run it per tenant.', true);
+      }
       const { params, body } = routeArguments(entry, finalArgs);
       deps.logger.info('CIPP exec', { target: entry.name, tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
       const result = await deps.service.callEndpoint(entry.method, entry.name, params, body);
@@ -295,6 +297,17 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
     default:
       return text(`Unknown meta tool: ${name}`, true);
   }
+}
+
+/** True if any tenantFilter (any key casing, at any depth) is "AllTenants" (trimmed, case-insensitive). */
+function hasAllTenants(node: unknown, depth = 0): boolean {
+  if (depth > 8 || node === null || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((n) => hasAllTenants(n, depth + 1));
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    if (k.toLowerCase() === 'tenantfilter' && typeof v === 'string' && v.trim().toLowerCase() === 'alltenants') return true;
+    if (hasAllTenants(v, depth + 1)) return true;
+  }
+  return false;
 }
 
 /** Which exec tool runs an entry of this tier. */

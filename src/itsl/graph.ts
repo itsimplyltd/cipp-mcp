@@ -14,7 +14,10 @@ export type GraphResult =
   | { ok: true; params: Record<string, unknown> }
   | { ok: false; reason: string };
 
-const ALLOWED_KEYS = new Set(['tenantfilter', 'endpoint', '$select', '$filter', '$top', '$expand', 'version', '$format']);
+// Input property names must match /^[a-zA-Z0-9_.-]{1,64}$/ (Anthropic API), so the OData options are
+// exposed WITHOUT the leading $ and mapped back to $select etc. below, where every check runs on the mapped value.
+const ODATA_KEYS = new Set(['select', 'filter', 'top', 'expand', 'format']);
+const ALLOWED_KEYS = new Set(['tenantfilter', 'endpoint', 'version', ...ODATA_KEYS]);
 const MAX_VALUE_LENGTH = 1000;
 
 /** Segments after which a final `microsoft.graph.<type>` OData cast is accepted. */
@@ -103,8 +106,11 @@ export function buildGraphRequest(args: Record<string, unknown>): GraphResult {
   for (const [k, v] of Object.entries(args)) {
     const lk = k.toLowerCase();
     if (byKey.has(lk)) return { ok: false, reason: `duplicate argument '${k}' (keys are compared case-insensitively).` };
+    if (lk.startsWith('$') && ODATA_KEYS.has(lk.slice(1))) {
+      return { ok: false, reason: `argument '${k}' is not accepted; use '${lk.slice(1)}' (without the $).` };
+    }
     if (!ALLOWED_KEYS.has(lk)) return { ok: false, reason: `argument '${k}' is not allowed.` };
-    byKey.set(lk, v);
+    byKey.set(ODATA_KEYS.has(lk) ? '$' + lk : lk, v);
   }
   const tenant = byKey.get('tenantfilter');
   if (typeof tenant !== 'string' || !/^[A-Za-z0-9._-]{1,255}$/.test(tenant)) {

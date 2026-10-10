@@ -74,7 +74,7 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
   });
 
   it('runs an allowed collection as a fixed GET with only the fixed parameters', async () => {
-    const res = await graph({ tenantFilter: 't.example', endpoint: '/v1.0/Users/abc/memberOf', $top: 5, $select: 'id,displayName' });
+    const res = await graph({ tenantFilter: 't.example', endpoint: '/v1.0/Users/abc/memberOf', top: 5, select: 'id,displayName' });
     expect(res.isError).toBeUndefined();
     const [url, init] = fetchMock.mock.calls.find(([u]) => u.includes('/api/ListGraphRequest'))!;
     expect(init?.method).toBe('GET');
@@ -144,7 +144,7 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
       { ENDPOINT: 'users' },
       { Endpoint: 'users' },
       { TENANTFILTER: 'b' },
-      { $Select: 'id', $select: 'id' },
+      { $Select: 'id', select: 'id' },
     ];
     for (const extra of extras) {
       expect((await graph({ tenantFilter: 't', endpoint: 'users', ...extra })).isError).toBe(true);
@@ -154,22 +154,22 @@ describe('rule 2: cipp_graph_request is allowlist-based', () => {
 
   it('validates $select/$filter/$expand/$top and refuses denylisted terms in them', async () => {
     const bads = [
-      { $expand: 'bitlocker' },
-      { $expand: 'deviceLocalCredentials' },
-      { $select: 'recoveryKey' },
-      { $filter: "x eq 'informationProtection'" },
-      { $top: 0 },
-      { $top: 1000 },
-      { $top: '5' },
-      { $top: 1.5 },
-      { $select: 5 },
-      { $expand: 'a'.repeat(1001) },
+      { expand: 'bitlocker' },
+      { expand: 'deviceLocalCredentials' },
+      { select: 'recoveryKey' },
+      { filter: "x eq 'informationProtection'" },
+      { top: 0 },
+      { top: 1000 },
+      { top: '5' },
+      { top: 1.5 },
+      { select: 5 },
+      { expand: 'a'.repeat(1001) },
     ];
     for (const bad of bads) {
       expect((await graph({ tenantFilter: 't', endpoint: 'users', ...bad })).isError).toBe(true);
     }
     expect(cippCalls()).toEqual([]);
-    const ok = await graph({ tenantFilter: 't', endpoint: 'users', $filter: 'accountEnabled eq true', $expand: 'manager', $top: 999 });
+    const ok = await graph({ tenantFilter: 't', endpoint: 'users', filter: 'accountEnabled eq true', expand: 'manager', top: 999 });
     expect(ok.isError).toBeUndefined();
   });
 
