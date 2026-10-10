@@ -114,8 +114,8 @@ To reach any CIPP endpoint, use the catalogue tools:
 - cipp_exec_write: run a write-tier endpoint (cache/sync triggers); listed only with the CIPP.Write role
   Search and tool-info results say which exec tool runs each entry (run_with).
   cipp_exec_write refuses tenantFilter=AllTenants: run write calls per tenant.
-  Advice: SharePointSharingLinks scans the site listing built by SharePointSiteUsage (and OneDriveUsage
-  for OneDrive); if the listing is empty run those first.
+  Always pass the tenant's defaultDomainName (from cipp_list_tenants) as tenantFilter. Another of
+  the tenant's domains can make some endpoints return a clean but EMPTY result instead of an error.
 - cipp_graph_request: read-only Microsoft Graph query for a tenant through CIPP
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
