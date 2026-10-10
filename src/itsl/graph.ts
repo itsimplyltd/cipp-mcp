@@ -14,7 +14,7 @@ export type GraphResult =
   | { ok: true; params: Record<string, unknown> }
   | { ok: false; reason: string };
 
-const ALLOWED_KEYS = new Set(['tenantfilter', 'endpoint', '$select', '$filter', '$top', '$expand', 'version']);
+const ALLOWED_KEYS = new Set(['tenantfilter', 'endpoint', '$select', '$filter', '$top', '$expand', 'version', '$format']);
 const MAX_VALUE_LENGTH = 1000;
 
 /** Segments after which a final `microsoft.graph.<type>` OData cast is accepted. */
@@ -136,6 +136,10 @@ export function buildGraphRequest(args: Record<string, unknown>): GraphResult {
       return { ok: false, reason: `${key} touches a protected resource.` };
     }
     params[key] = v;
+  }
+  if (byKey.has('$format')) {
+    if (byKey.get('$format') !== 'application/json') return { ok: false, reason: "$format must be exactly 'application/json'." };
+    params['$format'] = 'application/json';
   }
   if (byKey.has('$top')) {
     const t = byKey.get('$top');

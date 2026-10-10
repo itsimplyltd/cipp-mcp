@@ -204,23 +204,17 @@ export const GRAPH_CONTENT_SEGMENTS: readonly string[] = [
 ];
 
 /**
- * Argument keys whose VALUES may contain '/' (free-text, filter and URL keys).
- * Compared case-insensitively. Even for these keys `..`, `#`, backslash and
- * control characters are refused, and `?`, `&` and `%` stay refused (RULING:
- * conservative; the allowlist exempts only '/'). Add a key here after reviewing
- * what CIPP does with it.
- *  - filter, $filter, graphFilter: OData filter expressions
- *  - search, query, searchstring: free-text search
- *  - url, siteurl, weburl: SharePoint/site URLs
+ * Argument keys whose VALUES may contain '/' (free-text and filter keys), and
+ * also '&' and the guest marker #EXT#. Compared case-insensitively, TOP-LEVEL
+ * string values only (never nested). Even here `..`, backslash, control
+ * characters, '?' and '%' are refused.
+ * Keys ending "url" (siteUrl, url, webUrl, ...) are NOT here: their value must be
+ * an https SharePoint URL (see values.ts), so '/' needs no blanket allowance.
+ * Add a key here only after reviewing what CIPP does with it.
+ *
+ * NOTE: the value rules assume a read-only tool set. They MUST be revisited
+ * (passwords, out-of-office text, templates, free-text bodies) before Grant
+ * enables any write tool; today those tools are disabled so it is moot.
  */
-export const VALUE_SLASH_ALLOWED_KEYS: readonly string[] = [
-  'filter',
-  '$filter',
-  'graphfilter',
-  'search',
-  'query',
-  'searchstring',
-  'url',
-  'siteurl',
-  'weburl',
-];
+export const VALUE_FILTER_KEYS: readonly string[] = ['filter', '$filter', 'graphfilter', 'search', 'query', 'searchstring'];
+export const VALUE_SLASH_ALLOWED_KEYS: readonly string[] = VALUE_FILTER_KEYS;

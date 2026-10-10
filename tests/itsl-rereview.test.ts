@@ -81,10 +81,10 @@ describe('N1: argument value validation, centrally, before dispatch', () => {
   });
 
   it('the slash-allowed key list is exactly the agreed one', () => {
-    expect([...VALUE_SLASH_ALLOWED_KEYS]).toEqual(['filter', '$filter', 'graphfilter', 'search', 'query', 'searchstring', 'url', 'siteurl', 'weburl']);
+    expect([...VALUE_SLASH_ALLOWED_KEYS]).toEqual(['filter', '$filter', 'graphfilter', 'search', 'query', 'searchstring']);
   });
 
-  it.each(['filter', '$filter', 'Filter', 'graphFilter', 'search', 'Search', 'query', 'SearchString', 'URL', 'Url', 'SiteUrl', 'webUrl'])(
+  it.each(['filter', '$filter', 'Filter', 'graphFilter', 'search', 'Search', 'query', 'SearchString'])(
     'allows "/" in the value of %s (case-insensitive) but still refuses .., #, backslash and control characters',
     (key) => {
       expect(validateArgumentValues({ [key]: 'a/b' })).toBeUndefined();

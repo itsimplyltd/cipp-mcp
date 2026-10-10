@@ -92,7 +92,7 @@ export class CippToolHandler {
     // nothing below (the switch) can run for a tool the caller's tier forbids.
     if (isMetaTool(name)) {
       // Central value check (N1); cipp_graph_request's `endpoint` is a path it validates itself.
-      const bad = validateArgumentValues(args, name === 'cipp_graph_request' ? ['endpoint'] : []);
+      const bad = validateArgumentValues(args, name === 'cipp_graph_request' ? ['endpoint', '$format'] : []);
       if (bad) return { content: [{ type: 'text', text: `Refused: ${bad}` }], isError: true };
       return runMetaTool(name, args, {
         service: this.cippService,
