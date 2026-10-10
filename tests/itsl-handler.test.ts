@@ -2,6 +2,11 @@
 // no blocked or disabled endpoint, and no write endpoint for a read caller, is
 // reachable through cipp_exec_read or through any named tool.
 
+// tenantFilter canonicalisation has its own suite (itsl-tenant.test.ts); here it is a passthrough so these suites' CIPP call counts stay exact.
+jest.mock('../src/itsl/tenant.js', () => ({
+  canonicaliseTenantArgs: async (args: Record<string, unknown>) => ({ ok: true, args }),
+}));
+
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import fixture from './fixtures/openapi-fixture.json';

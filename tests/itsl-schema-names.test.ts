@@ -2,6 +2,11 @@
 // (cipp_graph_request once shipped "$select"). Also: cipp_graph_request's bare OData names,
 // and AllTenants refused on cipp_exec_write.
 
+// tenantFilter canonicalisation has its own suite (itsl-tenant.test.ts); here it is a passthrough so these suites' CIPP call counts stay exact.
+jest.mock('../src/itsl/tenant.js', () => ({
+  canonicaliseTenantArgs: async (args: Record<string, unknown>) => ({ ok: true, args }),
+}));
+
 import fixture from './fixtures/openapi-fixture.json';
 import { CippService } from '../src/services/cipp.service.js';
 import { CippToolHandler } from '../src/handlers/tool.handler.js';

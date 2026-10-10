@@ -4,6 +4,11 @@
 //  3 read tier is GET-only                   4 backup/diagnostic endpoints blocked
 //  5 no argument values logged pre-gate
 
+// tenantFilter canonicalisation has its own suite (itsl-tenant.test.ts); here it is a passthrough so these suites' CIPP call counts stay exact.
+jest.mock('../src/itsl/tenant.js', () => ({
+  canonicaliseTenantArgs: async (args: Record<string, unknown>) => ({ ok: true, args }),
+}));
+
 import fixture from './fixtures/openapi-fixture.json';
 import { CippService } from '../src/services/cipp.service.js';
 import { CippToolHandler } from '../src/handlers/tool.handler.js';

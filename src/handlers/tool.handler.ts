@@ -5,6 +5,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { McpError, ErrorCode } from '@modelcontextprotocol/sdk/types.js';
 import { validateArgumentValues } from '../itsl/values.js';
+import { canonicaliseTenantArgs } from '../itsl/tenant.js';
 import { frameResult, truncateError, tenantOf } from '../itsl/frame.js';
 import { CippService, OutOfOfficeInput } from '../services/cipp.service.js';
 import { Logger } from '../utils/logger.js';
@@ -86,6 +87,15 @@ export class CippToolHandler {
     return frameResult(result, tenantOf(args));
   }
 
+  /** Resolve every tenantFilter to the tenant's defaultDomainName (or refuse), with the caller's own token. */
+  private canonicaliseTenant(args: Record<string, unknown>) {
+    return canonicaliseTenantArgs(args, {
+      service: this.cippService,
+      user: this.context.user,
+      logger: this.logger,
+    });
+  }
+
   private async dispatch(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
     // Argument VALUES are never logged before the gate (they can hold passwords); after it, keys only.
     this.logger.debug(`Dispatching tool call: ${name}`);
@@ -96,6 +106,12 @@ export class CippToolHandler {
       // Central value check (N1); cipp_graph_request's `endpoint` is a path it validates itself.
       const bad = validateArgumentValues(args, name === 'cipp_graph_request' ? ['endpoint', 'format'] : []);
       if (bad) return { content: [{ type: 'text', text: `Refused: ${bad}` }], isError: true };
+      const execTarget = typeof args['name'] === 'string' ? args['name'].trim().toLowerCase() : '';
+      if (execTarget !== 'listtenants') {
+        const canon = await this.canonicaliseTenant(args);
+        if (!canon.ok) return { content: [{ type: 'text', text: canon.error }], isError: true };
+        args = canon.args;
+      }
       return runMetaTool(name, args, {
         service: this.cippService,
         logger: this.logger,
@@ -121,6 +137,12 @@ export class CippToolHandler {
     if (badValue) {
       this.logger.warn('CIPP tool call refused: argument value', { tool: name, user: this.context.user });
       return { content: [{ type: 'text', text: `Refused: ${badValue}` }], isError: true };
+    }
+
+    if (name !== 'cipp_list_tenants') {
+      const canon = await this.canonicaliseTenant(args);
+      if (!canon.ok) return { content: [{ type: 'text', text: canon.error }], isError: true };
+      args = canon.args;
     }
 
     this.logger.debug(`Tool call passed the tier gate: ${name}`, { argumentKeys: Object.keys(args) });

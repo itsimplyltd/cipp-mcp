@@ -1,6 +1,11 @@
 // cipp_exec_tool is split into cipp_exec_read (read-tier only) and cipp_exec_write
 // (write-tier only, listed only for write callers). Both share one implementation.
 
+// tenantFilter canonicalisation has its own suite (itsl-tenant.test.ts); here it is a passthrough so these suites' CIPP call counts stay exact.
+jest.mock('../src/itsl/tenant.js', () => ({
+  canonicaliseTenantArgs: async (args: Record<string, unknown>) => ({ ok: true, args }),
+}));
+
 import fixture from './fixtures/openapi-fixture.json';
 import { CippService } from '../src/services/cipp.service.js';
 import { CippToolHandler } from '../src/handlers/tool.handler.js';

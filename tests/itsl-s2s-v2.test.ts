@@ -1,6 +1,11 @@
 // S2S v2 (signed tier, user and token hash), the per-user token mode, and the
 // tier that reaches tools/list, tested at the HTTP boundary of the real server.
 
+// tenantFilter canonicalisation has its own suite (itsl-tenant.test.ts); here it is a passthrough so these suites' CIPP call counts stay exact.
+jest.mock('../src/itsl/tenant.js', () => ({
+  canonicaliseTenantArgs: async (args: Record<string, unknown>) => ({ ok: true, args }),
+}));
+
 import { createHmac } from 'node:crypto';
 import fixture from './fixtures/openapi-fixture.json';
 import { decideS2s, encodeMcpUser, sha256Hex, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';

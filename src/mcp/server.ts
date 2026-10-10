@@ -114,8 +114,10 @@ To reach any CIPP endpoint, use the catalogue tools:
 - cipp_exec_write: run a write-tier endpoint (cache/sync triggers); listed only with the CIPP.Write role
   Search and tool-info results say which exec tool runs each entry (run_with).
   cipp_exec_write refuses tenantFilter=AllTenants: run write calls per tenant.
-  Always pass the tenant's defaultDomainName (from cipp_list_tenants) as tenantFilter. Another of
-  the tenant's domains can make some endpoints return a clean but EMPTY result instead of an error.
+  tenantFilter accepts the tenant's defaultDomainName, tenant ID (GUID), initial .onmicrosoft.com domain
+  or any other domain CIPP lists for the tenant, and is normalised to the defaultDomainName (see
+  cipp_list_tenants) before the call. An unknown value is refused, never passed through: another of a
+  tenant's domains can otherwise make some endpoints return a clean but EMPTY result instead of an error.
 - cipp_graph_request: read-only Microsoft Graph query for a tenant through CIPP
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
