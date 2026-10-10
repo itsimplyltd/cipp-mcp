@@ -1,0 +1,311 @@
+// IT Simply Ltd: the catalogue meta-tools and the tier gate (new file).
+//
+// cipp_search_tools / cipp_get_tool_info / cipp_exec_tool / cipp_graph_request
+// mirror the public CIPP MCP's meta-tool pattern. Every path that reaches CIPP
+// from here checks the target's tier against the caller's SIGNED tier first.
+
+import {
+  Catalogue,
+  CatalogueEntry,
+  CatalogueLogger,
+  CatalogueStore,
+  catalogueStore,
+  defaultSpecFetchers,
+  findEntry,
+  routeArguments,
+  searchEntries,
+  SpecApi,
+  SpecFetcher,
+} from './catalogue.js';
+import { GRAPH_BLOCKED_ENDPOINTS } from './policy.js';
+import { endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
+import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
+
+export interface ToolContext {
+  /** From a verified S2S v2 header only; `read` when nothing was verified. */
+  tier: CallerTier;
+  /** UPN from a verified S2S v2 header, for logging. */
+  user?: string | undefined;
+}
+
+export const DEFAULT_CONTEXT: ToolContext = { tier: 'read' };
+
+export const META_TOOL_NAMES = [
+  'cipp_search_tools',
+  'cipp_get_tool_info',
+  'cipp_exec_tool',
+  'cipp_graph_request',
+] as const;
+
+export interface MetaToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
+export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
+  {
+    name: 'cipp_search_tools',
+    description:
+      "Search or browse the catalogue of CIPP API endpoints that you are allowed to call. Returns name, category, method, tier and a one-line summary; use cipp_get_tool_info for the input schema and cipp_exec_tool to run one. Endpoints your tier cannot call are never listed. Call with no query to browse; use 'category' to narrow (e.g. 'Identity', 'Email-Exchange', 'Endpoint', 'Tenant', 'Security', 'Teams-Sharepoint', 'CIPP').",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Keywords; every word must match the name, summary, description or category.' },
+        category: { type: 'string', description: "Category prefix, e.g. 'Identity' or 'Email-Exchange'." },
+        limit: { type: 'number', description: 'Maximum results (default 25, max 100).' },
+        offset: { type: 'number', description: 'Skip this many results (paging).' },
+      },
+    },
+    annotations: { title: 'Search CIPP endpoint catalogue', readOnlyHint: true },
+  },
+  {
+    name: 'cipp_get_tool_info',
+    description:
+      'Get the description and input schema of one or more CIPP endpoints from the catalogue. Refuses endpoints you cannot call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        names: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Endpoint names exactly as returned by cipp_search_tools (max 10).',
+        },
+      },
+      required: ['names'],
+    },
+    annotations: { title: 'Get CIPP endpoint schema', readOnlyHint: true },
+  },
+  {
+    name: 'cipp_exec_tool',
+    description:
+      "Run a CIPP endpoint from the catalogue by name. Arguments go in 'arguments': they become query parameters for GET endpoints, or for POST endpoints the declared query parameters plus a JSON body. Read-tier endpoints run for everyone; write-tier endpoints (currently only cache and sync triggers) need the CIPP.Write role. Blocked and disabled endpoints are refused. CIPP still applies your own CIPP role.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Endpoint name from cipp_search_tools.' },
+        arguments: { type: 'object', description: 'Arguments matching the schema from cipp_get_tool_info.' },
+      },
+      required: ['name'],
+    },
+    annotations: { title: 'Run a CIPP endpoint', readOnlyHint: false, destructiveHint: false },
+  },
+  {
+    name: 'cipp_graph_request',
+    description:
+      "Run a read-only Microsoft Graph GET against a tenant through CIPP (ListGraphRequest). Provide the tenant and the Graph path, plus optional OData options ($select, $filter, $top, ...). Paths that expose secrets (BitLocker keys, LAPS passwords, temporary access passes) are refused.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tenantFilter: { type: 'string', description: "Tenant domain or ID, or 'AllTenants'." },
+        endpoint: { type: 'string', description: "Graph path, e.g. 'users' or 'security/alerts_v2'." },
+        $select: { type: 'string' },
+        $filter: { type: 'string' },
+        $top: { type: 'number' },
+        $expand: { type: 'string' },
+        $orderby: { type: 'string' },
+        $search: { type: 'string' },
+        $count: { type: 'boolean' },
+        Version: { type: 'string', description: "'v1.0' (default) or 'beta'." },
+      },
+      required: ['tenantFilter', 'endpoint'],
+    },
+    annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true },
+  },
+];
+
+export function isMetaTool(name: string): boolean {
+  return (META_TOOL_NAMES as readonly string[]).includes(name);
+}
+
+/** Role lookup against the loaded catalogue (never triggers a fetch). */
+export function liveRoleLookup(store: CatalogueStore = catalogueStore): RoleLookup | undefined {
+  const cat = store.peek();
+  if (!cat) return undefined;
+  return (endpoint) => {
+    const e = findEntry(cat, endpoint);
+    return e ? { found: true, role: e.role } : { found: false, role: undefined };
+  };
+}
+
+/** Whether a named tool is callable by this caller (the single rule used by tools/list AND dispatch). */
+export function namedToolDecision(
+  toolName: string,
+  ctx: ToolContext,
+  store: CatalogueStore = catalogueStore
+): { tier: Tier; allowed: boolean; reason: string } | undefined {
+  const tier = namedToolTier(toolName, liveRoleLookup(store));
+  if (!tier) return undefined;
+  const allowed = isCallable(tier, ctx.tier);
+  return { tier, allowed, reason: allowed ? '' : refusalReason(toolName, tier, ctx.tier) };
+}
+
+export interface MetaDeps {
+  service: SpecApi;
+  logger: CatalogueLogger & { error(message: string, meta?: unknown): void };
+  ctx: ToolContext;
+  store?: CatalogueStore;
+  /** Override the spec sources (tests). */
+  fetchers?: SpecFetcher[];
+}
+
+export interface MetaResult {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+}
+
+const text = (value: unknown, isError = false): MetaResult => ({
+  content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
+  ...(isError ? { isError: true } : {}),
+});
+
+async function loadCatalogue(deps: MetaDeps): Promise<Catalogue> {
+  const store = deps.store ?? catalogueStore;
+  return store.get(deps.fetchers ?? defaultSpecFetchers(deps.service), deps.logger);
+}
+
+function graphEndpointBlocked(endpoint: unknown): boolean {
+  if (typeof endpoint !== 'string') return false;
+  let decoded = endpoint;
+  try {
+    decoded = decodeURIComponent(endpoint);
+  } catch {
+    // keep the raw string; the patterns still run on it
+  }
+  return GRAPH_BLOCKED_ENDPOINTS.some((p) => p.test(decoded) || p.test(endpoint));
+}
+
+/** Refusal logging: tool, target, tier, user. Never arguments, never tokens. */
+function logRefusal(deps: MetaDeps, tool: string, target: string, tier: Tier | 'unknown'): void {
+  deps.logger.warn('CIPP tool call refused', { tool, target, targetTier: tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
+}
+
+export async function runMetaTool(name: string, args: Record<string, unknown>, deps: MetaDeps): Promise<MetaResult> {
+  switch (name) {
+    case 'cipp_search_tools': {
+      let cat: Catalogue;
+      try {
+        cat = await loadCatalogue(deps);
+      } catch (err) {
+        return text(err instanceof Error ? err.message : String(err), true);
+      }
+      const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      const opts = {
+        ...(typeof args['query'] === 'string' ? { query: args['query'] } : {}),
+        ...(typeof args['category'] === 'string' ? { category: args['category'] } : {}),
+        ...(num(args['limit']) !== undefined ? { limit: num(args['limit']) } : {}),
+        ...(num(args['offset']) !== undefined ? { offset: num(args['offset']) } : {}),
+      };
+      return text(searchEntries(cat, opts, (e) => isCallable(e.tier, deps.ctx.tier)));
+    }
+
+    case 'cipp_get_tool_info': {
+      const raw = args['names'] ?? args['name'];
+      const names = (Array.isArray(raw) ? raw : [raw]).filter((n): n is string => typeof n === 'string').slice(0, 10);
+      if (names.length === 0) return text("Provide 'names': an array of endpoint names.", true);
+      let cat: Catalogue;
+      try {
+        cat = await loadCatalogue(deps);
+      } catch (err) {
+        return text(err instanceof Error ? err.message : String(err), true);
+      }
+      const out = names.map((n) => {
+        const blockedByName = computeTier(n, undefined) === 'blocked';
+        const e = findEntry(cat, n);
+        const tier: Tier | undefined = blockedByName ? 'blocked' : e?.tier;
+        if (!tier || !e) return { name: n, error: `'${n}' is not an endpoint in this server's CIPP catalogue.` };
+        if (!isCallable(tier, deps.ctx.tier)) {
+          logRefusal(deps, 'cipp_get_tool_info', e.name, tier);
+          return { name: n, error: refusalReason(e.name, tier, deps.ctx.tier) };
+        }
+        return describe(e);
+      });
+      return text(out);
+    }
+
+    case 'cipp_exec_tool': {
+      const target = args['name'];
+      if (typeof target !== 'string' || target.trim() === '') return text("Provide 'name': the endpoint to run.", true);
+      const callArgs = args['arguments'];
+      if (callArgs !== undefined && (typeof callArgs !== 'object' || callArgs === null || Array.isArray(callArgs))) {
+        return text("'arguments' must be an object.", true);
+      }
+      // Blocked-by-name needs no catalogue: refuse before any network work.
+      if (computeTier(target, undefined) === 'blocked') {
+        logRefusal(deps, name, target, 'blocked');
+        return text(refusalReason(target, 'blocked', deps.ctx.tier), true);
+      }
+      let cat: Catalogue;
+      try {
+        cat = await loadCatalogue(deps);
+      } catch (err) {
+        return text(err instanceof Error ? err.message : String(err), true);
+      }
+      const entry = findEntry(cat, target);
+      if (!entry) {
+        logRefusal(deps, name, target, 'unknown');
+        return text(`'${target}' is not an endpoint in this server's CIPP catalogue. Use cipp_search_tools to find endpoint names.`, true);
+      }
+      // Recompute from role and name rather than trusting a stored field.
+      const tier = computeTier(entry.name, entry.role);
+      if (!isCallable(tier, deps.ctx.tier)) {
+        logRefusal(deps, name, entry.name, tier);
+        return text(refusalReason(entry.name, tier, deps.ctx.tier), true);
+      }
+      const finalArgs = (callArgs ?? {}) as Record<string, unknown>;
+      if (entry.name.toLowerCase() === 'listgraphrequest' && graphEndpointBlocked(finalArgs['Endpoint'] ?? finalArgs['endpoint'])) {
+        logRefusal(deps, name, `${entry.name}(graph path)`, 'blocked');
+        return text(`Refused: that Graph path exposes secrets and is blocked by IT Simply policy.`, true);
+      }
+      const { params, body } = routeArguments(entry, finalArgs);
+      deps.logger.info('CIPP exec', { target: entry.name, tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
+      const result = await deps.service.callEndpoint(entry.method, entry.name, params, body);
+      return text(result);
+    }
+
+    case 'cipp_graph_request': {
+      const effective = endpointTier('ListGraphRequest', liveRoleLookup(deps.store ?? catalogueStore));
+      if (!isCallable(effective, deps.ctx.tier)) {
+        logRefusal(deps, name, 'ListGraphRequest', effective);
+        return text(refusalReason('cipp_graph_request', effective, deps.ctx.tier), true);
+      }
+      const endpoint = args['endpoint'] ?? args['Endpoint'];
+      if (typeof endpoint !== 'string' || typeof args['tenantFilter'] !== 'string') {
+        return text("Provide 'tenantFilter' and 'endpoint'.", true);
+      }
+      if (graphEndpointBlocked(endpoint)) {
+        logRefusal(deps, name, 'ListGraphRequest(graph path)', 'blocked');
+        return text('Refused: that Graph path exposes secrets and is blocked by IT Simply policy.', true);
+      }
+      const ALLOWED = ['tenantFilter', '$select', '$filter', '$top', '$expand', '$orderby', '$search', '$count', 'Version'];
+      const params: Record<string, unknown> = { Endpoint: endpoint };
+      for (const k of ALLOWED) if (args[k] !== undefined) params[k] = args[k];
+      return text(await deps.service.callEndpoint('GET', 'ListGraphRequest', params));
+    }
+
+    default:
+      return text(`Unknown meta tool: ${name}`, true);
+  }
+}
+
+function describe(e: CatalogueEntry) {
+  return {
+    name: e.name,
+    category: e.category,
+    method: e.method,
+    tier: e.tier,
+    summary: e.summary,
+    description: e.description,
+    inputSchema: e.inputSchema,
+  };
+}
+
+/** Endpoints every named tool calls must have a row in the role table; used by tests and a boot check. */
+export function namedToolEndpointsMissingRoles(): string[] {
+  const missing: string[] = [];
+  for (const eps of Object.values(NAMED_TOOL_ENDPOINTS)) {
+    for (const ep of eps) if (!(ep in KNOWN_ENDPOINT_ROLES)) missing.push(ep);
+  }
+  return [...new Set(missing)];
+}

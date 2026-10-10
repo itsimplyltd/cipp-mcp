@@ -1,3 +1,4 @@
+// Modified by IT Simply Ltd, 2026: added callEndpoint, a path-validated passthrough used only by the tier-checked catalogue tools (src/itsl/)
 // CIPP API Service
 // Wraps all HTTP calls to the CIPP Azure Function App.
 // All endpoints live at {baseUrl}/api/{FunctionName} and are authenticated
@@ -886,6 +887,34 @@ export class CippService {
         `Failed to parse CIPP API response as JSON (${method} ${url.toString()}): ${message}`
       );
     }
+  }
+
+  /**
+   * IT Simply: generic call to any CIPP endpoint, for the catalogue tools.
+   * It performs NO tier check: callers (src/itsl/meta-tools.ts) must already
+   * have authorised the endpoint. The path is restricted to a bare function
+   * name so it can never carry a traversal, a query or a different URL.
+   * Query parameters are sent for POST as well as GET.
+   */
+  async callEndpoint<T = unknown>(
+    method: 'GET' | 'POST',
+    path: string,
+    params?: Record<string, unknown>,
+    body?: Record<string, unknown> | unknown[],
+    timeoutMs?: number
+  ): Promise<T> {
+    if (!/^[A-Za-z0-9_]+$/.test(path)) {
+      throw new McpError(ErrorCode.InvalidParams, 'Invalid CIPP endpoint name.');
+    }
+    if (method === 'GET') {
+      return this.request<T>('GET', path, params, undefined, timeoutMs);
+    }
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params ?? {})) {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    }
+    const target = qs.toString() ? `${path}?${qs.toString()}` : path;
+    return this.request<T>('POST', target, undefined, body as Record<string, unknown> | undefined, timeoutMs);
   }
 
   // -------------------------------------------------------------------------
