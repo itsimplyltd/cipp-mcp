@@ -21,6 +21,7 @@ import {
 import { buildGraphRequest } from './graph.js';
 import { endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
 import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
+import { runSharingSync, SHARING_SYNC_TOOL_DEFINITION, SHARING_SYNC_TOOL_NAME } from './sharing-sync.js';
 
 export interface ToolContext {
   /** From a verified S2S v2 header only; `read` when nothing was verified. */
@@ -37,6 +38,7 @@ export const META_TOOL_NAMES = [
   'cipp_exec_read',
   'cipp_exec_write',
   'cipp_graph_request',
+  SHARING_SYNC_TOOL_NAME,
 ] as const;
 
 export interface MetaToolDefinition {
@@ -127,6 +129,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
     },
     annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
+  SHARING_SYNC_TOOL_DEFINITION,
 ];
 
 export function isMetaTool(name: string): boolean {
@@ -293,6 +296,10 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       deps.logger.info('CIPP graph read', { path: built.params['Endpoint'], tier: deps.ctx.tier, user: deps.ctx.user });
       return text(await deps.service.callEndpoint('GET', 'ListGraphRequest', built.params));
     }
+
+    case SHARING_SYNC_TOOL_NAME:
+      // Read-tier exception to the write-tier ExecCIPPDBCache: fixed cache names, one tenant, cooldown (sharing-sync.ts).
+      return runSharingSync(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
 
     default:
       return text(`Unknown meta tool: ${name}`, true);

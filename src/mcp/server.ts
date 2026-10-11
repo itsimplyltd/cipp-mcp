@@ -119,6 +119,9 @@ To reach any CIPP endpoint, use the catalogue tools:
   cipp_list_tenants) before the call. An unknown value is refused, never passed through: another of a
   tenant's domains can otherwise make some endpoints return a clean but EMPTY result instead of an error.
 - cipp_graph_request: read-only Microsoft Graph query for a tenant through CIPP
+- cipp_sync_sharepoint_sharing: refresh the SharePoint/OneDrive sharing caches behind ListSharePointSharing
+  for ONE tenant (listed for everyone). The one write-type action open to the read tier: fixed caches only,
+  no AllTenants, at most once per tenant every 15 minutes. Use it when linksSynced is false or the data is old.
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
 Named tools that can change data are listed only when your tier allows them, and are disabled at launch.

@@ -115,11 +115,12 @@ describe('b) every listed tool has annotations that reflect its effective behavi
       expect(t.annotations!.destructiveHint).toBe(false);
     }
     const by = (n: string) => tools.find((t) => t.name === n)!.annotations!;
-    // everything listed except cipp_exec_write is read-only
+    // everything listed except cipp_exec_write and the sharing sync (it starts a CIPP cache run) is read-only
     for (const t of tools) {
-      if (t.name === 'cipp_exec_write') continue;
+      if (t.name === 'cipp_exec_write' || t.name === 'cipp_sync_sharepoint_sharing') continue;
       expect(t.annotations!.readOnlyHint).toBe(true);
     }
+    expect(by('cipp_sync_sharepoint_sharing')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     expect(by('cipp_exec_read')).toMatchObject({ readOnlyHint: true, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     if (ctx.tier === 'write') {
       expect(by('cipp_exec_write')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: false });
