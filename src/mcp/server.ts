@@ -100,6 +100,7 @@ Access is tiered. Every CIPP endpoint is read, write, disabled or blocked:
 - write: callable only with the CIPP.Write gateway role. At launch this is only the cache and sync
   triggers (ExecCIPPDBCache, ExecSyncAPDevices, ExecSyncDEP, ExecSyncVPP, ExecExtensionSync,
   ExecTestRefresh, ExecTestRun).
+  Also cipp_disable_enterprise_app / cipp_enable_enterprise_app: switch one third-party enterprise app (service principal) off or on in one tenant; Microsoft and IT Simply apps are refused.
 - disabled: everything else that can change data, until IT Simply reviews it. Refused for everyone.
 - blocked: sensitive or dangerous endpoints (LAPS passwords, BitLocker keys, MFA push, secrets and
   settings). Refused for everyone.

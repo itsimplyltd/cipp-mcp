@@ -112,20 +112,26 @@ describe('b) every listed tool has annotations that reflect its effective behavi
       expect(typeof t.annotations!.title).toBe('string');
       expect(typeof t.annotations!.readOnlyHint).toBe('boolean');
       expect(t.annotations!.openWorldHint).toBe(true);
-      expect(t.annotations!.destructiveHint).toBe(false);
+      // Only the enterprise-app disable tool is destructive (it can break sign-in to an app).
+      expect(t.annotations!.destructiveHint).toBe(t.name === 'cipp_disable_enterprise_app');
     }
     const by = (n: string) => tools.find((t) => t.name === n)!.annotations!;
-    // everything listed except cipp_exec_write and the sharing sync (it starts a CIPP cache run) is read-only
+    // everything listed except cipp_exec_write, the sharing sync (it starts a CIPP cache run) and the
+    // enterprise-app toggles is read-only
+    const notReadOnly = ['cipp_exec_write', 'cipp_sync_sharepoint_sharing', 'cipp_disable_enterprise_app', 'cipp_enable_enterprise_app'];
     for (const t of tools) {
-      if (t.name === 'cipp_exec_write' || t.name === 'cipp_sync_sharepoint_sharing') continue;
+      if (notReadOnly.includes(t.name)) continue;
       expect(t.annotations!.readOnlyHint).toBe(true);
     }
     expect(by('cipp_sync_sharepoint_sharing')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     expect(by('cipp_exec_read')).toMatchObject({ readOnlyHint: true, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     if (ctx.tier === 'write') {
+      expect(by('cipp_disable_enterprise_app')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: true, idempotentHint: true });
+      expect(by('cipp_enable_enterprise_app')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: true });
       expect(by('cipp_exec_write')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: false });
     } else {
       expect(tools.some((t) => t.name === 'cipp_exec_write')).toBe(false);
+      expect(tools.some((t) => t.name === 'cipp_disable_enterprise_app' || t.name === 'cipp_enable_enterprise_app')).toBe(false);
     }
     expect(tools.some((t) => t.name === 'cipp_exec_tool')).toBe(false);
     expect(by('cipp_search_tools').readOnlyHint).toBe(true);

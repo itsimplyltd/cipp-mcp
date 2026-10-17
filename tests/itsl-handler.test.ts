@@ -16,7 +16,7 @@ import { Logger } from '../src/utils/logger.js';
 import { TOOL_DEFINITIONS } from '../src/mcp/tool.definitions.js';
 import { catalogueStore } from '../src/itsl/catalogue.js';
 import { NAMED_TOOL_ENDPOINTS, namedToolTier } from '../src/itsl/named-tools.js';
-import { META_TOOL_NAMES, ToolContext } from '../src/itsl/meta-tools.js';
+import { META_TOOL_NAMES, ToolContext, WRITE_ONLY_META_TOOLS } from '../src/itsl/meta-tools.js';
 import { jsonResponse } from './helpers.js';
 
 const logger = new Logger('error');
@@ -162,11 +162,11 @@ describe('tools/list is filtered by tier', () => {
     for (const ctx of [READ, WRITE]) {
       const names = handler(ctx).getToolDefinitions().map((t) => t.name);
       for (const w of WYRE_WRITE_TOOLS) expect(names).not.toContain(w);
-      for (const m of META_TOOL_NAMES.filter((n) => n !== 'cipp_exec_write')) expect(names).toContain(m);
-      expect(names.includes('cipp_exec_write')).toBe(ctx.tier === 'write');
+      for (const m of META_TOOL_NAMES.filter((n) => !WRITE_ONLY_META_TOOLS.includes(n))) expect(names).toContain(m);
+      for (const w of WRITE_ONLY_META_TOOLS) expect(names.includes(w)).toBe(ctx.tier === 'write');
       expect(names).toContain('cipp_list_users');
       expect(names).toContain('cipp_list_tenants');
-      expect(names).toHaveLength(31 + META_TOOL_NAMES.length - (ctx.tier === 'write' ? 0 : 1));
+      expect(names).toHaveLength(31 + META_TOOL_NAMES.length - (ctx.tier === 'write' ? 0 : WRITE_ONLY_META_TOOLS.length));
       for (const t of POST_READ_NAMED_TOOLS) expect(names).not.toContain(t);
     }
   });

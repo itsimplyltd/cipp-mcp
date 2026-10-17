@@ -291,9 +291,21 @@ describe('server HTTP boundary', () => {
       expect(names).not.toContain('cipp_create_user');
       expect(names).not.toContain('cipp_run_standards_check');
     }
-    expect(read).not.toContain('cipp_exec_write');
-    expect(write).toContain('cipp_exec_write');
-    expect(write).toHaveLength(read.length + 1); // the 14 write tools are disabled at BOTH tiers
+    for (const w of ['cipp_exec_write', 'cipp_disable_enterprise_app', 'cipp_enable_enterprise_app']) {
+      expect(read).not.toContain(w);
+      expect(write).toContain(w);
+    }
+    expect(write).toHaveLength(read.length + 3); // the 14 write tools are disabled at BOTH tiers
+  });
+
+  it('a read-tier caller cannot disable or enable an enterprise app through the real server; CIPP never sees it', async () => {
+    for (const tool of ['cipp_disable_enterprise_app', 'cipp_enable_enterprise_app']) {
+      const res = await post(v2('read'), callTool(tool, { tenantFilter: 'aviva.org.nz', servicePrincipalId: '3f2c9a7e-1b4d-4c8e-9a0f-5d6e7f8a9b0c' }));
+      const body = (await res.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0]!.text).toMatch(/write-tier/);
+    }
+    expect(upstreamCalls.some((c) => c.url.includes('/api/ExecApplication') || c.url.includes('/api/ListGraphRequest'))).toBe(false);
   });
 
   it('write-tier exec runs through the real server; read-tier exec is refused and CIPP never sees it', async () => {

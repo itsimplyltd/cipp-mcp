@@ -1,4 +1,4 @@
-// Modified by IT Simply Ltd, 2026: every tool call is tier-checked in handleToolCall; tools/list is filtered by tier; catalogue meta-tools added
+// Modified by IT Simply Ltd, 2026: every tool call is tier-checked in handleToolCall; tools/list is filtered by tier; catalogue meta-tools added; write-only meta tools hidden from read callers
 // CIPP Tool Handler
 // Dispatches MCP tool calls to the correct CippService method.
 
@@ -17,6 +17,7 @@ import {
   namedToolDecision,
   runMetaTool,
   ToolContext,
+  WRITE_ONLY_META_TOOLS,
 } from '../itsl/meta-tools.js';
 
 export interface McpToolResult {
@@ -66,8 +67,8 @@ export class CippToolHandler {
         },
       ];
     });
-    // cipp_exec_write exists only for write-tier callers.
-    const meta = META_TOOL_DEFINITIONS.filter((t) => t.name !== 'cipp_exec_write' || this.context.tier === 'write');
+    // cipp_exec_write and the enterprise-app toggles exist only for write-tier callers.
+    const meta = META_TOOL_DEFINITIONS.filter((t) => !WRITE_ONLY_META_TOOLS.includes(t.name) || this.context.tier === 'write');
     return [...named, ...meta];
   }
 

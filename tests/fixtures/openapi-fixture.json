@@ -516,6 +516,18 @@
         "parameters": []
       }
     },
+    "/api/ExecApplication": {
+      "post": {
+        "summary": "ExecApplication",
+        "operationId": "ExecApplication",
+        "tags": [
+          "Tenant > Administration"
+        ],
+        "description": "ExecApplication description",
+        "x-cipp-role": "Tenant.Application.ReadWrite",
+        "parameters": []
+      }
+    },
     "/api/ExecDisableUser": {
       "post": {
         "summary": "Disable user",

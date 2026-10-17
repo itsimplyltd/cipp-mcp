@@ -218,3 +218,25 @@ export const GRAPH_CONTENT_SEGMENTS: readonly string[] = [
  */
 export const VALUE_FILTER_KEYS: readonly string[] = ['filter', '$filter', 'graphfilter', 'search', 'query', 'searchstring'];
 export const VALUE_SLASH_ALLOWED_KEYS: readonly string[] = VALUE_FILTER_KEYS;
+
+/**
+ * cipp_disable_enterprise_app / cipp_enable_enterprise_app (app-toggle.ts) refuse any service
+ * principal whose appOwnerOrganizationId is in one of these two lists (lower-case GUIDs,
+ * compared case-insensitively). Add a tenant here to protect every app it owns.
+ *
+ * Microsoft's first-party apps: disabling one (Exchange Online, SharePoint, Graph, Teams...)
+ * can break a whole tenant, and none of them is ours or the client's to switch off.
+ *  - f8cdef31-a31e-4b4a-93e4-5f571e91255a: Microsoft Services, the owner of first-party apps.
+ *  - 72f988bf-86f1-41af-91ab-2d7cd011db47: Microsoft's corporate tenant, which owns many more.
+ */
+export const MICROSOFT_FIRST_PARTY_TENANT_IDS: readonly string[] = [
+  'f8cdef31-a31e-4b4a-93e4-5f571e91255a',
+  '72f988bf-86f1-41af-91ab-2d7cd011db47',
+];
+
+/**
+ * IT Simply's own tenant. It owns the apps our tooling runs on in every client tenant: the MCP
+ * gateway, the data gateway, the CIPP SAM app and Practice Intelligence. Disabling one of them
+ * through this server would cut IT Simply (and this server) off from the client.
+ */
+export const ITSL_OWN_TENANT_IDS: readonly string[] = ['caaf597f-c70a-428d-8dae-312ff86d1e23'];
