@@ -24,6 +24,7 @@ import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier
 import { MESSAGE_TRACE_TOOL_DEFINITION, MESSAGE_TRACE_TOOL_NAME, runMessageTrace } from './message-trace.js';
 import { AUDIT_TOOL_DEFINITIONS, AUDIT_TOOL_NAMES, projectDbCacheResult, restrictDbCache, runAuditTool } from './audit-tools.js';
 import { truncateError } from './frame.js';
+import { PERMISSIONS_SYNC_TOOL_DEFINITION, PERMISSIONS_SYNC_TOOL_NAME, runPermissionsSync } from './permissions-sync.js';
 import { runSharingSync, SHARING_SYNC_TOOL_DEFINITION, SHARING_SYNC_TOOL_NAME } from './sharing-sync.js';
 import {
   APP_DISABLE_TOOL_DEFINITION,
@@ -49,6 +50,7 @@ export const META_TOOL_NAMES = [
   'cipp_exec_write',
   'cipp_graph_request',
   SHARING_SYNC_TOOL_NAME,
+  PERMISSIONS_SYNC_TOOL_NAME,
   MESSAGE_TRACE_TOOL_NAME,
   ...AUDIT_TOOL_NAMES,
   APP_DISABLE_TOOL_NAME,
@@ -147,6 +149,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
     annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   SHARING_SYNC_TOOL_DEFINITION,
+  PERMISSIONS_SYNC_TOOL_DEFINITION,
   MESSAGE_TRACE_TOOL_DEFINITION,
   ...AUDIT_TOOL_DEFINITIONS,
   APP_DISABLE_TOOL_DEFINITION,
@@ -340,6 +343,10 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
     case SHARING_SYNC_TOOL_NAME:
       // Read-tier exception to the write-tier ExecCIPPDBCache: fixed cache names, one tenant, cooldown (sharing-sync.ts).
       return runSharingSync(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
+
+    case PERMISSIONS_SYNC_TOOL_NAME:
+      // Same exception for the SharePointPermissions cache behind ListSharePointPermissions (permissions-sync.ts).
+      return runPermissionsSync(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
 
     case MESSAGE_TRACE_TOOL_NAME:
       // The only route to the disabled ListMessageTrace: one tenant, sender/recipient required, subjects removed (message-trace.ts).

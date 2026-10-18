@@ -123,6 +123,9 @@ To reach any CIPP endpoint, use the catalogue tools:
 - cipp_sync_sharepoint_sharing: refresh the SharePoint/OneDrive sharing caches behind ListSharePointSharing
   for ONE tenant (listed for everyone). The one write-type action open to the read tier: fixed caches only,
   no AllTenants, at most once per tenant every 15 minutes. Use it when linksSynced is false or the data is old.
+- cipp_sync_sharepoint_permissions: refresh the SharePoint permissions scan (SharePointPermissions cache) behind
+  ListSharePointPermissions for ONE tenant (listed for everyone). Same limits as the sharing sync, but at most
+  once per tenant every 60 minutes (the scan walks every site). It runs in the background; wait before heavy per-site reads.
 - cipp_message_trace: Exchange message trace for ONE tenant (listed for everyone). Needs a sender and/or
   recipient address and covers up to 10 days; subjects are removed by policy.
 - cipp_get_authorization_policy: live Entra authorization policy for ONE tenant (default user permissions incl. agent-identity-blueprint creation, guest invites, SSPR), projected.

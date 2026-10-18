@@ -118,12 +118,13 @@ describe('b) every listed tool has annotations that reflect its effective behavi
     const by = (n: string) => tools.find((t) => t.name === n)!.annotations!;
     // everything listed except cipp_exec_write, the sharing sync (it starts a CIPP cache run) and the
     // enterprise-app toggles is read-only
-    const notReadOnly = ['cipp_exec_write', 'cipp_sync_sharepoint_sharing', 'cipp_disable_enterprise_app', 'cipp_enable_enterprise_app'];
+    const notReadOnly = ['cipp_exec_write', 'cipp_sync_sharepoint_sharing', 'cipp_sync_sharepoint_permissions', 'cipp_disable_enterprise_app', 'cipp_enable_enterprise_app'];
     for (const t of tools) {
       if (notReadOnly.includes(t.name)) continue;
       expect(t.annotations!.readOnlyHint).toBe(true);
     }
     expect(by('cipp_sync_sharepoint_sharing')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: true });
+    expect(by('cipp_sync_sharepoint_permissions')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     expect(by('cipp_exec_read')).toMatchObject({ readOnlyHint: true, openWorldHint: true, destructiveHint: false, idempotentHint: true });
     if (ctx.tier === 'write') {
       expect(by('cipp_disable_enterprise_app')).toMatchObject({ readOnlyHint: false, openWorldHint: true, destructiveHint: true, idempotentHint: true });
