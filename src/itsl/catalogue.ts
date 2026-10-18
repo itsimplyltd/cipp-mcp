@@ -259,6 +259,8 @@ export interface CatalogueLogger {
 
 export const CATALOGUE_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
+/** Background retry interval while the catalogue has not loaded (or a refresh failed). */
+export const CATALOGUE_RETRY_MS = 10 * 60 * 1000;
 
 /**
  * Holds the last good catalogue. Lazy: built on the first request, refreshed
@@ -270,11 +272,15 @@ export class CatalogueStore {
   private inFlight: Promise<Catalogue> | undefined;
   private lastFailureAt = 0;
   private lastVersion: string | undefined;
+  private lastError: unknown;
   private seen = new Set<string>();
+  private bgTimer: ReturnType<typeof setTimeout> | undefined;
+  private bgStarted = false;
 
   constructor(
     private readonly ttlMs = CATALOGUE_TTL_MS,
-    private readonly clock: () => number = Date.now
+    private readonly clock: () => number = Date.now,
+    private readonly retryMs = CATALOGUE_RETRY_MS
   ) {}
 
   /** The loaded catalogue, if any, without triggering a fetch. */
@@ -287,16 +293,47 @@ export class CatalogueStore {
     this.current = undefined;
     this.inFlight = undefined;
     this.lastFailureAt = 0;
+    this.lastError = undefined;
     this.seen = new Set();
+    if (this.bgTimer) clearTimeout(this.bgTimer);
+    this.bgTimer = undefined;
+    this.bgStarted = false;
   }
 
-  async get(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): Promise<Catalogue> {
-    const now = this.clock();
-    if (this.current && now - this.current.builtAt < this.ttlMs) return this.current;
-    // Within the back-off after a failure, keep serving the stale copy rather than hammering CIPP.
-    if (this.current && this.lastFailureAt > 0 && now - this.lastFailureAt < FAILURE_BACKOFF_MS) {
-      return this.current;
-    }
+  /**
+   * Recovery without a restart. Started once, by the first `get`: loads (or
+   * reloads) in the background, every `retryMs` while there is no catalogue or
+   * the last refresh failed, and every `ttlMs` once it succeeds. A failed
+   * refresh never replaces the current catalogue (see `refresh`). The timer is
+   * unref'd so it never keeps the process alive.
+   */
+  private ensureBackground(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): void {
+    if (this.bgStarted) return;
+    this.bgStarted = true;
+    const schedule = (delay: number): void => {
+      this.bgTimer = setTimeout(() => void tick(), delay);
+      this.bgTimer.unref?.();
+    };
+    const tick = async (): Promise<void> => {
+      let ok = false;
+      try {
+        await this.load(fetchers, logger);
+        ok = true;
+      } catch (err) {
+        logger.warn('CIPP catalogue background load failed', {
+          error: errMsg(err),
+          retryInMs: this.retryMs,
+          haveCatalogue: this.current !== undefined,
+        });
+      }
+      schedule(ok ? this.ttlMs : this.retryMs);
+    };
+    // The first attempt is the request that triggered us; if it succeeded the next is a TTL away.
+    schedule(this.current ? this.ttlMs : this.retryMs);
+  }
+
+  /** One shared load; records the failure time and error. Replaces `current` only on success. */
+  private async load(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): Promise<Catalogue> {
     if (!this.inFlight) {
       this.inFlight = this.refresh(fetchers, logger).finally(() => {
         this.inFlight = undefined;
@@ -306,6 +343,30 @@ export class CatalogueStore {
       return await this.inFlight;
     } catch (err) {
       this.lastFailureAt = this.clock();
+      this.lastError = err;
+      throw err;
+    }
+  }
+
+  async get(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): Promise<Catalogue> {
+    const now = this.clock();
+    if (this.current && now - this.current.builtAt < this.ttlMs) return this.current;
+    // Within the back-off after a failure, keep serving the stale copy rather than hammering CIPP.
+    if (this.current && this.lastFailureAt > 0 && now - this.lastFailureAt < FAILURE_BACKOFF_MS) {
+      return this.current;
+    }
+    // No catalogue yet and a recent failure: the background loop owns the retries; do not
+    // hit CIPP and GitHub (60 unauthenticated calls/hour) on every request.
+    if (!this.current && this.lastError !== undefined && now - this.lastFailureAt < this.retryMs) {
+      this.ensureBackground(fetchers, logger);
+      throw this.lastError;
+    }
+    try {
+      const cat = await this.load(fetchers, logger);
+      this.ensureBackground(fetchers, logger);
+      return cat;
+    } catch (err) {
+      this.ensureBackground(fetchers, logger);
       if (this.current) {
         logger.warn('CIPP spec refresh failed; serving the last good catalogue', { error: errMsg(err) });
         return this.current;
@@ -401,6 +462,21 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
   return JSON.parse(await res.text());
 }
 
+const HISTORY_MAX_COMMITS = 30;
+
+/** GitHub REST API GET (unauthenticated); a 403/429 is a rate limit and is reported as one. */
+async function fetchGithubApi(url: string, fetchImpl: typeof fetch): Promise<unknown> {
+  const res = await fetchImpl(url, {
+    signal: AbortSignal.timeout(SPEC_TIMEOUT_MS),
+    headers: { Accept: 'application/vnd.github+json' },
+  });
+  if (res.status === 403 || res.status === 429) {
+    throw new Error(`GitHub API rate limit (HTTP ${res.status}; unauthenticated calls are limited to 60 per hour)`);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${new URL(url).host}`);
+  return JSON.parse(await res.text());
+}
+
 /**
  * Sources, in order:
  *  1. our own CIPP's `GET /api/ListOpenApiSpec` with the caller's token (path overridable with ITSL_SPEC_PATH).
@@ -410,6 +486,10 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
  *     `version_latest.txt` EQUALS the reported version exactly. A branch with a different
  *     version is never used (unreleased code would drift the tiers). Needed because CIPP
  *     versions can run ahead of the repo's tags.
+ *  5. `Config/openapi.json` at the COMMIT on a branch (master, then dev) whose `version_latest.txt`
+ *     equals the reported version exactly, found through the GitHub commits API (unauthenticated,
+ *     read-only, at most 30 commits per branch). CIPP-API stopped publishing releases and tags
+ *     after 10.9.1 and the branches run ahead of the deployed version, so (2)-(4) cannot match.
  * (2) and (3) exist because (1) could not be confirmed to exist in CIPP's public code; see the build report.
  */
 export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetch): SpecFetcher[] {
@@ -428,6 +508,7 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
   const reported = (): Promise<string> => releaseTag();
   const branches = (process.env.ITSL_SPEC_BRANCHES || 'master,dev').split(',').map((b) => b.trim()).filter(Boolean);
   let matched: string | undefined;
+  let historyMatched: string | undefined;
   return [
     { name: 'cipp-api', fetch: () => api.callEndpoint('GET', specPath, undefined, undefined, SPEC_TIMEOUT_MS) },
     {
@@ -462,6 +543,49 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
           }
         }
         throw new Error(`no branch matches the reported CIPP version ${want} (${seen.join('; ')})`);
+      },
+    },
+    {
+      name: 'github-history-matching-version',
+      version: () => historyMatched,
+      fetch: async () => {
+        const want = await reported();
+        const seen: string[] = [];
+        for (const branch of branches) {
+          let commits: unknown;
+          try {
+            commits = await fetchGithubApi(
+              `https://api.github.com/repos/${repo}/commits?path=version_latest.txt&sha=${encodeURIComponent(branch)}&per_page=${HISTORY_MAX_COMMITS}`,
+              fetchImpl
+            );
+          } catch (err) {
+            seen.push(`${branch}: ${errMsg(err)}`);
+            continue;
+          }
+          const shas = (Array.isArray(commits) ? commits : [])
+            .map((c) => (isObj(c) ? c['sha'] : undefined))
+            .filter((x): x is string => typeof x === 'string' && /^[0-9a-f]{7,64}$/i.test(x))
+            .slice(0, HISTORY_MAX_COMMITS);
+          // Newest first, so the first exact match is the LAST commit before version_latest.txt moved
+          // away from the wanted value: the spec at that commit is the released spec. Later commits on
+          // the branch may carry spec changes that were not released, which is why we pin to the sha.
+          for (const sha of shas) {
+            let have: string;
+            try {
+              have = (await fetchText(`https://raw.githubusercontent.com/${repo}/${sha}/version_latest.txt`, fetchImpl)).trim();
+            } catch (err) {
+              seen.push(`${branch}@${sha.slice(0, 7)}: ${errMsg(err)}`);
+              continue;
+            }
+            if (have === want) {
+              const spec = await fetchJson(`https://raw.githubusercontent.com/${repo}/${sha}/Config/openapi.json`, fetchImpl);
+              historyMatched = want;
+              return spec;
+            }
+          }
+          seen.push(`${branch}: no match in the last ${shas.length} version_latest.txt commits`);
+        }
+        throw new Error(`no commit history matches the reported CIPP version ${want} (${seen.join('; ')})`);
       },
     },
   ];
