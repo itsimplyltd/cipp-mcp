@@ -22,7 +22,8 @@ import { buildGraphRequest } from './graph.js';
 import { AUDIT_TOOL_ENDPOINTS, endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
 import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
 import { MESSAGE_TRACE_TOOL_DEFINITION, MESSAGE_TRACE_TOOL_NAME, runMessageTrace } from './message-trace.js';
-import { AUDIT_TOOL_DEFINITIONS, AUDIT_TOOL_NAMES, restrictDbCache, runAuditTool } from './audit-tools.js';
+import { AUDIT_TOOL_DEFINITIONS, AUDIT_TOOL_NAMES, projectDbCacheResult, restrictDbCache, runAuditTool } from './audit-tools.js';
+import { truncateError } from './frame.js';
 import { runSharingSync, SHARING_SYNC_TOOL_DEFINITION, SHARING_SYNC_TOOL_NAME } from './sharing-sync.js';
 import {
   APP_DISABLE_TOOL_DEFINITION,
@@ -292,7 +293,9 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       const canon = canonicaliseArguments(entry, (callArgs ?? {}) as Record<string, unknown>);
       if (!canon.ok) return text(`Refused: ${canon.reason}`, true);
       let finalArgs = canon.args;
-      // ListDBCache serves cached tenant data of many kinds: only reviewed cache types may be read (policy.ts).
+      // ListDBCache serves cached tenant data of many kinds: one tenant, reviewed cache types only, three arguments
+      // only (policy.ts, audit-tools.ts), and the rows are projected below.
+      let dbCache: { type: string; countsOnly: boolean } | undefined;
       if (entry.name.toLowerCase() === 'listdbcache') {
         const restricted = restrictDbCache(finalArgs);
         if (!restricted.ok) {
@@ -300,6 +303,7 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
           return text(`Refused: ${restricted.reason}`, true);
         }
         finalArgs = restricted.args;
+        dbCache = { type: restricted.type, countsOnly: restricted.countsOnly };
       }
       if (want === 'write' && hasAllTenants(finalArgs)) {
         logRefusal(deps, name, entry.name, tier);
@@ -308,6 +312,13 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       const { params, body } = routeArguments(entry, finalArgs);
       deps.logger.info('CIPP exec', { target: entry.name, tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
       const result = await deps.service.callEndpoint(entry.method, entry.name, params, body);
+      if (dbCache) {
+        try {
+          return text(projectDbCacheResult(dbCache.type, dbCache.countsOnly, result));
+        } catch (err) {
+          return text(truncateError(err instanceof Error ? err.message : String(err)), true);
+        }
+      }
       return text(result);
     }
 

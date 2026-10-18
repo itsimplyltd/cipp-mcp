@@ -39,7 +39,7 @@ const spec = {
   ...fixture,
   paths: {
     ...fixture.paths,
-    '/api/ListDBCache': withParams(role('CIPP.Core.Read'), ['tenantFilter', 'type', 'countsOnly', 'select']),
+    '/api/ListDBCache': withParams(role('CIPP.Core.Read'), ['tenantFilter', 'type', 'countsOnly', 'select', 'top', 'groupBy', 'latestOnly', 'dateField']),
     '/api/ListGraphRequest': role('CIPP.Core.Read'),
     '/api/ListExoRequest': role('CIPP.Core.Read', 'post'),
   },
@@ -183,17 +183,16 @@ describe('the exact CIPP request of each tool', () => {
     expect(res.isError).toBeUndefined();
     expect(graphCalls()).toHaveLength(1);
     const p = q(graphCalls()[0]!);
-    expect(Object.fromEntries(p)).toEqual({ tenantFilter: 'client.example', Endpoint: 'policies/authorizationPolicy', Version: 'beta', $top: '999' });
+    expect(Object.fromEntries(p)).toEqual({ tenantFilter: 'client.example', Endpoint: 'policies/authorizationPolicy', Version: 'beta' });
   });
 
-  it('delegated grants: oauth2PermissionGrants with a fixed select', async () => {
+  it('delegated grants: beta oauth2PermissionGrants with $top=999 only, as CIPP own cache read does', async () => {
     await run(GRANTS);
     expect(Object.fromEntries(q(graphCalls()[0]!))).toEqual({
       tenantFilter: 'client.example',
       Endpoint: 'oauth2PermissionGrants',
-      Version: 'v1.0',
+      Version: 'beta',
       $top: '999',
-      $select: 'id,clientId,resourceId,consentType,principalId,scope',
     });
   });
 
@@ -202,8 +201,7 @@ describe('the exact CIPP request of each tool', () => {
     expect(Object.fromEntries(q(graphCalls()[0]!))).toEqual({
       tenantFilter: 'client.example',
       Endpoint: `servicePrincipals/${SP}/appRoleAssignments`,
-      Version: 'v1.0',
-      $top: '999',
+      Version: 'beta',
     });
   });
 
@@ -212,7 +210,7 @@ describe('the exact CIPP request of each tool', () => {
     expect(Object.fromEntries(q(graphCalls()[0]!))).toEqual({
       tenantFilter: 'client.example',
       Endpoint: 'applications',
-      Version: 'v1.0',
+      Version: 'beta',
       $top: '999',
       $select: 'id,appId,displayName,createdDateTime,signInAudience,publisherDomain,passwordCredentials,keyCredentials',
       $expand: 'owners($select=id,userPrincipalName)',
@@ -222,7 +220,10 @@ describe('the exact CIPP request of each tool', () => {
   it('consent policies: two fixed v1.0 Graph GETs', async () => {
     await run(CONSENT);
     expect(graphCalls().map((c) => q(c).get('Endpoint'))).toEqual(['policies/permissionGrantPolicies', 'policies/adminConsentRequestPolicy']);
-    for (const c of graphCalls()) expect(q(c).get('Version')).toBe('v1.0');
+    for (const c of graphCalls()) {
+      expect(q(c).get('Version')).toBe('beta');
+      expect([...q(c).keys()].sort()).toEqual(['Endpoint', 'Version', 'tenantFilter']);
+    }
   });
 
   it('cross-tenant policy: the default policy only', async () => {
@@ -231,9 +232,19 @@ describe('the exact CIPP request of each tool', () => {
     expect(Object.fromEntries(q(graphCalls()[0]!))).toEqual({
       tenantFilter: 'client.example',
       Endpoint: 'policies/crossTenantAccessPolicy/default',
-      Version: 'v1.0',
-      $top: '999',
+      Version: 'beta',
     });
+  });
+
+  it('$top is sent only on grants and applications: never on singletons or other collections', async () => {
+    graph['policies/authorizationpolicy'] = [{ id: 'a' }];
+    graph['policies/crosstenantaccesspolicy/default'] = [{ isServiceDefault: true }];
+    for (const tool of AUDIT_TOOL_NAMES) await run(tool, ARGS[tool]!);
+    const withTop = graphCalls().filter((c) => q(c).has('$top')).map((c) => q(c).get('Endpoint'));
+    expect(withTop.sort()).toEqual(['applications', 'oauth2PermissionGrants']);
+    const withSelect = graphCalls().filter((c) => q(c).has('$select')).map((c) => q(c).get('Endpoint'));
+    expect(withSelect).toEqual(['applications']);
+    for (const c of graphCalls()) expect(q(c).get('Version')).toBe('beta');
   });
 
   it('outbound spam policy: ListDBCache with the fixed type, then the same type for the timestamp; never ListExoRequest', async () => {
@@ -292,6 +303,8 @@ describe('projection: unknown fields are dropped, credential values never appear
           allowedToReadBitlockerKeysForOwnedDevice: true,
           allowedToReadOtherUsers: true,
           nested: { x: 1 },
+          someFutureFlag: 'new-value',
+          anotherNewBoolean: true,
         },
         ...TRAPS,
       },
@@ -325,6 +338,17 @@ describe('projection: unknown fields are dropped, credential values never appear
     const body = json(await run(GRANTS));
     expect(body.grants).toEqual([{ id: 'g1', clientId: 'c', resourceId: 'r', consentType: 'AllPrincipals', principalId: null, scope: 'User.Read' }]);
     expect(body.returned).toBe(1);
+    expect(body.truncated).toBe(false);
+  });
+
+  it('a grant scope is NEVER cut, however long (the last scope is the finding)', async () => {
+    const scope = Array.from({ length: 300 }, (_, i) => `Scope.Number${i}`).join(' ') + ' Mail.ReadWrite';
+    expect(scope.length).toBeGreaterThan(4096);
+    graph['oauth2permissiongrants'] = [{ id: 'g1', clientId: 'c', resourceId: 'r', consentType: 'AllPrincipals', principalId: null, scope }];
+    const body = json(await run(GRANTS));
+    expect(body.grants[0].scope).toBe(scope);
+    expect(body.grants[0].scope.endsWith('Mail.ReadWrite')).toBe(true);
+    expect(body.truncated).toBe(false);
   });
 
   it('app role assignments keep six fields', async () => {
@@ -348,10 +372,10 @@ describe('projection: unknown fields are dropped, credential values never appear
         tags: ['dropped'],
         web: { redirectUris: ['https://x'] },
         passwordCredentials: [
-          { keyId: 'k1', displayName: 'secret', startDateTime: 's', endDateTime: 'e', hint: 'abc', secretText: 'SECRET-VALUE-1', customKeyIdentifier: 'CKI-3', key: 'KEY-VALUE-2' },
+          { keyId: 'k1', displayName: 'secret', startDateTime: 's', endDateTime: 'e', hint: 'HNT-ZZ', secretText: 'SECRET-VALUE-1', customKeyIdentifier: 'CKI-3', key: 'KEY-VALUE-2' },
         ],
         keyCredentials: [
-          { keyId: 'k2', displayName: 'cert', startDateTime: 's', endDateTime: 'e', hint: null, key: 'KEY-VALUE-2', customKeyIdentifier: 'CKI-3', type: 'AsymmetricX509Cert', usage: 'Verify' },
+          { keyId: 'k2', displayName: 'cert', startDateTime: 's', endDateTime: 'e', hint: 'HNT-YY', key: 'KEY-VALUE-2', customKeyIdentifier: 'CKI-3', type: 'AsymmetricX509Cert', usage: 'Verify' },
         ],
         owners: [{ '@odata.type': 'x', id: 'u1', userPrincipalName: 'a@client.example', mail: 'dropped@x', passwordProfile: { password: 'PW-4' } }],
         ...TRAPS,
@@ -367,12 +391,12 @@ describe('projection: unknown fields are dropped, credential values never appear
         createdDateTime: 'c',
         signInAudience: 'AzureADMyOrg',
         publisherDomain: 'client.example',
-        passwordCredentials: [{ keyId: 'k1', displayName: 'secret', startDateTime: 's', endDateTime: 'e', hint: 'abc' }],
-        keyCredentials: [{ keyId: 'k2', displayName: 'cert', startDateTime: 's', endDateTime: 'e', hint: null }],
+        passwordCredentials: [{ keyId: 'k1', displayName: 'secret', startDateTime: 's', endDateTime: 'e' }],
+        keyCredentials: [{ keyId: 'k2', displayName: 'cert', startDateTime: 's', endDateTime: 'e' }],
         owners: [{ id: 'u1', userPrincipalName: 'a@client.example' }],
       },
     ]);
-    for (const v of ['SECRET-VALUE-1', 'KEY-VALUE-2', 'CKI-3', 'PW-4', 'CS-5', 'EXTRA', 'dropped']) expect(text(res)).not.toContain(v);
+    for (const v of ['SECRET-VALUE-1', 'KEY-VALUE-2', 'CKI-3', 'PW-4', 'CS-5', 'EXTRA', 'dropped', 'HNT-ZZ', 'HNT-YY', 'hint']) expect(text(res)).not.toContain(v);
   });
 
   it('consent policies keep conditions and the admin consent workflow fields', async () => {
@@ -382,7 +406,9 @@ describe('projection: unknown fields are dropped, credential values never appear
         displayName: 'Low',
         description: 'd',
         deletedDateTime: 'dropped',
-        includes: [{ id: 'i1', permissionType: 'delegated', permissionClassification: 'low', resourceApplication: 'any', permissions: ['all'], clientApplicationIds: ['a'], clientApplicationTenantIds: ['t'], clientApplicationPublisherIds: ['p'], clientApplicationsFromVerifiedPublisherOnly: true, other: 'dropped' }],
+        includeAllPreApprovedApplications: false,
+        resourceScopeType: 'tenant',
+        includes: [{ id: 'i1', permissionType: 'delegated', permissionClassification: 'low', resourceApplication: 'any', permissions: ['all'], clientApplicationIds: ['a'], clientApplicationTenantIds: ['t'], clientApplicationPublisherIds: ['p'], clientApplicationsFromVerifiedPublisherOnly: true, certifiedClientApplicationsOnly: true, scopeSensitivityLabels: { labelKind: 'dropped' }, other: 'dropped' }],
         excludes: [],
       },
     ];
@@ -396,7 +422,9 @@ describe('projection: unknown fields are dropped, credential values never appear
         id: 'microsoft-user-default-low',
         displayName: 'Low',
         description: 'd',
-        includes: [{ id: 'i1', permissionType: 'delegated', permissionClassification: 'low', resourceApplication: 'any', permissions: ['all'], clientApplicationIds: ['a'], clientApplicationTenantIds: ['t'], clientApplicationPublisherIds: ['p'], clientApplicationsFromVerifiedPublisherOnly: true }],
+        includeAllPreApprovedApplications: false,
+        resourceScopeType: 'tenant',
+        includes: [{ id: 'i1', permissionType: 'delegated', permissionClassification: 'low', resourceApplication: 'any', permissions: ['all'], clientApplicationIds: ['a'], clientApplicationTenantIds: ['t'], clientApplicationPublisherIds: ['p'], clientApplicationsFromVerifiedPublisherOnly: true, certifiedClientApplicationsOnly: true }],
         excludes: [],
       },
     ]);
@@ -422,28 +450,47 @@ describe('projection: unknown fields are dropped, credential values never appear
     expect(body.adminConsentRequestPolicy).toEqual({ isEnabled: false });
   });
 
-  it('cross-tenant policy keeps the named blocks and drops the rest', async () => {
+  it('cross-tenant policy: an explicit nested field list; unknown keys at any level are dropped', async () => {
+    const access = (type: string) => ({
+      usersAndGroups: { accessType: type, targets: [{ target: 'AllUsers', targetType: 'user', secretThing: 'dropped' }], anyNewField: 'dropped' },
+      applications: { accessType: type, targets: [{ target: 'AllApplications', targetType: 'application' }] },
+      newBlock: { x: 'dropped' },
+    });
     graph['policies/crosstenantaccesspolicy/default'] = [
       {
         '@odata.context': 'x',
+        id: 'dropped-id',
         isServiceDefault: true,
-        inboundTrust: { isMfaAccepted: true, isCompliantDeviceAccepted: false },
-        b2bCollaborationInbound: { usersAndGroups: { accessType: 'allowed', targets: [{ target: 'AllUsers', targetType: 'user' }] } },
-        b2bCollaborationOutbound: { applications: { accessType: 'blocked' } },
-        b2bDirectConnectInbound: {},
-        b2bDirectConnectOutbound: {},
-        automaticUserConsentSettings: { inboundAllowed: true, outboundAllowed: null },
-        tenantRestrictions: { usersAndGroups: { accessType: 'blocked' } },
+        blockServiceProviderOutboundAccess: false,
+        inboundTrust: { isMfaAccepted: true, isCompliantDeviceAccepted: false, isHybridAzureADJoinedDeviceAccepted: false, isCompliantNetworkAccepted: false, futureFlag: 'dropped' },
+        b2bCollaborationInbound: access('allowed'),
+        b2bCollaborationOutbound: access('allowed'),
+        b2bDirectConnectInbound: access('blocked'),
+        b2bDirectConnectOutbound: access('blocked'),
+        automaticUserConsentSettings: { inboundAllowed: true, outboundAllowed: null, extra: 'dropped' },
+        tenantRestrictions: { devices: null, usersAndGroups: { accessType: 'blocked', targets: [{ target: 'AllUsers', targetType: 'user' }] }, applications: { accessType: 'blocked', targets: [] } },
         invitationRedemptionIdentityProviderConfiguration: { secret: 'dropped' },
+        crossCloudMeetingConfiguration: { inboundAllowed: true },
         ...TRAPS,
       },
     ];
-    const body = json(await run(XT));
+    const res = await run(XT);
+    const body = json(res);
     expect(Object.keys(body.policy).sort()).toEqual(
       ['automaticUserConsentSettings', 'b2bCollaborationInbound', 'b2bCollaborationOutbound', 'b2bDirectConnectInbound', 'b2bDirectConnectOutbound', 'inboundTrust', 'isServiceDefault', 'tenantRestrictions'].sort()
     );
-    expect(body.policy.inboundTrust).toEqual({ isMfaAccepted: true, isCompliantDeviceAccepted: false });
-    expect(JSON.stringify(body)).not.toContain('dropped');
+    expect(body.policy.inboundTrust).toEqual({ isMfaAccepted: true, isCompliantDeviceAccepted: false, isHybridAzureADJoinedDeviceAccepted: false, isCompliantNetworkAccepted: false });
+    expect(body.policy.b2bCollaborationInbound).toEqual({
+      usersAndGroups: { accessType: 'allowed', targets: [{ target: 'AllUsers', targetType: 'user' }] },
+      applications: { accessType: 'allowed', targets: [{ target: 'AllApplications', targetType: 'application' }] },
+    });
+    expect(body.policy.automaticUserConsentSettings).toEqual({ inboundAllowed: true, outboundAllowed: null });
+    expect(body.policy.tenantRestrictions).toEqual({
+      usersAndGroups: { accessType: 'blocked', targets: [{ target: 'AllUsers', targetType: 'user' }] },
+      applications: { accessType: 'blocked', targets: [] },
+      devices: null,
+    });
+    expect(text(res)).not.toContain('dropped');
   });
 
   it('outbound spam policy keeps seven fields and the cache timestamp', async () => {
@@ -479,12 +526,48 @@ describe('projection: unknown fields are dropped, credential values never appear
     expect(body.note).toMatch(/cache holds no outbound spam policy/);
   });
 
+  it('a long string other than scope is cut, flagged in truncatedFields, and the text says so', async () => {
+    graph['oauth2permissiongrants'] = [{ id: 'g1', clientId: 'c'.repeat(5000), scope: 's' }];
+    const res = await run(GRANTS);
+    const body = json(res);
+    expect(body.grants[0].clientId).toHaveLength(4096);
+    expect(body.truncated).toBe(true);
+    expect(body.truncatedFields).toEqual(['clientId']);
+    expect(body.note).toMatch(/TRUNCATED: some values were cut \(clientId\)/);
+  });
+
+  it('a long array is cut, flagged and named', async () => {
+    graph['policies/permissiongrantpolicies'] = [
+      { id: 'p1', displayName: 'x', includes: [{ id: 'i', permissions: Array.from({ length: 600 }, (_, i) => `perm${i}`) }], excludes: [] },
+    ];
+    graph['policies/adminconsentrequestpolicy'] = [{ isEnabled: false }];
+    const body = json(await run(CONSENT));
+    expect(body.permissionGrantPolicies[0].includes[0].permissions).toHaveLength(500);
+    expect(body.truncated).toBe(true);
+    expect(body.truncatedFields).toEqual(['conditions.permissions']);
+  });
+
+  it('an app with 20 owners (the Graph expand limit) is flagged ownersTruncated', async () => {
+    const owners = Array.from({ length: 20 }, (_, i) => ({ id: `u${i}`, userPrincipalName: `u${i}@client.example` }));
+    graph['applications'] = [
+      { id: 'a1', displayName: 'Many owners', owners },
+      { id: 'a2', displayName: 'Few owners', owners: owners.slice(0, 3) },
+    ];
+    const body = json(await run(APPS));
+    expect(body.applications[0].ownersTruncated).toBe(true);
+    expect(body.applications[1].ownersTruncated).toBeUndefined();
+    expect(body.truncated).toBe(true);
+    expect(body.truncatedFields).toEqual(['owners']);
+  });
+
   it('a long list is truncated and says so', async () => {
     graph['oauth2permissiongrants'] = Array.from({ length: AUDIT_MAX_ROWS + 5 }, (_, i) => ({ id: `g${i}`, scope: 's' }));
     const body = json(await run(GRANTS));
     expect(body.returned).toBe(AUDIT_MAX_ROWS + 5);
     expect(body.shown).toBe(AUDIT_MAX_ROWS);
     expect(body.truncated).toBe(true);
+    expect(body.truncatedFields).toEqual(['grants (rows)']);
+    expect(body.note).toMatch(/TRUNCATED/);
     expect(body.grants).toHaveLength(AUDIT_MAX_ROWS);
   });
 
@@ -586,7 +669,7 @@ describe('ListDBCache type allow-list through cipp_exec_read', () => {
     for (const args of [{}, { countsOnly: 'true' }, { select: 'id' }, { groupBy: 'Tenant' }, { type: undefined }]) {
       const res = await exec(args);
       expect(res.isError).toBe(true);
-      expect(text(res)).toMatch(/needs a 'type'|must be a single string/);
+      expect(text(res)).toMatch(/needs a 'type'|must be a single string|accepts only/);
     }
     expect(dbCalls()).toEqual([]);
   });
@@ -632,6 +715,143 @@ describe('ListDBCache type allow-list through cipp_exec_read', () => {
     expect(dbCalls()).toEqual([]);
   });
 
+  it.each([
+    'AllTenants',
+    'alltenants',
+    'ALLTENANTS',
+    ' AllTenants ',
+    '\uFF21\uFF4C\uFF4C\uFF34\uFF45\uFF4E\uFF41\uFF4E\uFF54\uFF53', // fullwidth
+    'All\u200bTenants', // zero-width space
+    'AllTenants\u00a0', // no-break space
+    'All\u00adTenants', // soft hyphen
+    'AllTenants\u200d',
+    'ALL\u2060TENANTS',
+    'allTenants\ufeff',
+  ])('refuses tenantFilter %j through cipp_exec_read, for every allowed type and both tiers', async (tenant) => {
+    for (const ctx of [READ, WRITE]) {
+      for (const type of DBCACHE_ALLOWED_TYPES) {
+        const res = await exec({ type, tenantFilter: tenant }, ctx);
+        expect(res.isError).toBe(true);
+      }
+    }
+    expect(dbCalls()).toEqual([]);
+  });
+
+  it('restrictDbCache refuses every AllTenants variant itself, not only through the handler checks', () => {
+    for (const t of ['AllTenants', 'alltenants', ' ALLTENANTS ', '\uFF21llTenants', 'All\u200bTenants', 'AllTenants\u00a0', 'All\u00adTenants', 'ALL\u2060TENANTS', 'allTenants\ufeff', 'AllTenants\t']) {
+      const r = restrictDbCache({ tenantFilter: t, type: 'AuthorizationPolicy' });
+      expect(r.ok).toBe(false);
+    }
+    expect(restrictDbCache({ tenantFilter: 'client.example', type: 'AuthorizationPolicy' }).ok).toBe(true);
+  });
+
+  it('AllTenants is refused with the single-tenant message in the plain cases', async () => {
+    for (const t of ['AllTenants', 'alltenants', ' ALLTENANTS ']) {
+      const res = await exec({ type: 'OAuth2PermissionGrants', tenantFilter: t });
+      expect(text(res)).toMatch(/AllTenants is not allowed/);
+    }
+  });
+
+  it('refuses a missing tenantFilter and AllTenants hidden in a duplicate key casing', async () => {
+    const noTenant = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListDBCache', arguments: { type: 'AuthorizationPolicy' } });
+    expect(noTenant.isError).toBe(true);
+    const dup = await exec({ type: 'AuthorizationPolicy', TenantFilter: 'AllTenants' });
+    expect(dup.isError).toBe(true);
+    expect(dbCalls()).toEqual([]);
+  });
+
+  it.each([
+    ['groupBy', 'Tenant'],
+    ['select', 'id'],
+    ['top', 5],
+    ['latestOnly', 'true'],
+    ['dateField', 'createdDateTime'],
+    ['GroupBy', 'Tenant'],
+    ['UseReportDB', 'true'],
+    ['somethingElse', 'x'],
+  ])('refuses the extra argument %s: only tenantFilter, type and countsOnly are accepted', async (key, value) => {
+    const res = await exec({ type: 'AuthorizationPolicy', [key]: value });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/accepts only tenantFilter, type and countsOnly/);
+    expect(dbCalls()).toEqual([]);
+  });
+
+  it('accepts countsOnly true or false and refuses anything else', async () => {
+    for (const countsOnly of ['true', true, 'false', false]) {
+      expect((await exec({ type: 'AuthorizationPolicy', countsOnly })).isError).toBeUndefined();
+    }
+    for (const countsOnly of ['yes', 1, null, 'TRUE ', ['true']]) {
+      const res = await exec({ type: 'AuthorizationPolicy', countsOnly });
+      expect(res.isError).toBe(true);
+    }
+  });
+
+  describe('rows come back projected, never raw', () => {
+    const TRAP = { secretText: 'SECRET-VALUE-1', passwordProfile: { password: 'PW-4' }, extraField: 'EXTRA-FIELD', ObjectClass: ['EXTRA-FIELD'] };
+    const results = async (type: string, rows: unknown[]) => {
+      cache[type] = rows;
+      const res = await exec({ type });
+      expect(res.isError).toBeUndefined();
+      expect(text(res)).not.toMatch(/SECRET-VALUE-1|PW-4|EXTRA-FIELD/);
+      return json(res);
+    };
+
+    it('AuthorizationPolicy', async () => {
+      const body = await results('AuthorizationPolicy', [{ id: 'authorizationPolicy', allowedToUseSSPR: true, defaultUserRolePermissions: { allowedToCreateApps: true, someFutureFlag: 'x' }, ...TRAP }]);
+      expect(body.Results).toEqual([{ id: 'authorizationPolicy', allowedToUseSSPR: true, defaultUserRolePermissions: { allowedToCreateApps: true } }]);
+    });
+    it('OAuth2PermissionGrants (scope uncut)', async () => {
+      const scope = 'a '.repeat(3000) + 'Mail.ReadWrite';
+      const body = await results('OAuth2PermissionGrants', [{ id: 'g', clientId: 'c', scope, Tenant: 'client.example', ...TRAP }]);
+      expect(body.Results).toEqual([{ Tenant: 'client.example', id: 'g', clientId: 'c', scope }]);
+      expect(body.truncated).toBe(false);
+    });
+    it('AppRoleAssignments', async () => {
+      const body = await results('AppRoleAssignments', [{ resourceId: 'r', appRoleId: 'a', principalId: 'p', ...TRAP }]);
+      expect(body.Results).toEqual([{ resourceId: 'r', appRoleId: 'a', principalId: 'p' }]);
+    });
+    it('PermissionGrantPolicies', async () => {
+      const body = await results('PermissionGrantPolicies', [{ id: 'p', displayName: 'd', includes: [{ id: 'i', permissions: ['all'], ...TRAP }], ...TRAP }]);
+      expect(body.Results).toEqual([{ id: 'p', displayName: 'd', includes: [{ id: 'i', permissions: ['all'] }] }]);
+    });
+    it('AdminConsentRequestPolicy', async () => {
+      const body = await results('AdminConsentRequestPolicy', [{ isEnabled: true, reviewers: [{ query: '/users/u', ...TRAP }], ...TRAP }]);
+      expect(body.Results).toEqual([{ isEnabled: true, reviewers: [{ query: '/users/u' }] }]);
+    });
+    it('CrossTenantAccessPolicy', async () => {
+      const body = await results('CrossTenantAccessPolicy', [{ isServiceDefault: true, inboundTrust: { isMfaAccepted: true, ...TRAP }, ...TRAP }]);
+      expect(body.Results).toEqual([{ isServiceDefault: true, inboundTrust: { isMfaAccepted: true } }]);
+    });
+    it('ExoHostedOutboundSpamFilterPolicy', async () => {
+      const body = await results('ExoHostedOutboundSpamFilterPolicy', [
+        { Name: 'Default', IsDefault: true, AutoForwardingMode: 'Automatic', RecipientLimitPerDay: 1000, NotifyOutboundSpamRecipients: ['EXTRA-FIELD@x'], DistinguishedName: 'EXTRA-FIELD', ...TRAP },
+      ]);
+      expect(body.Results).toEqual([{ Name: 'Default', IsDefault: true, AutoForwardingMode: 'Automatic', RecipientLimitPerDay: 1000 }]);
+    });
+    it('countsOnly rows keep four fields', async () => {
+      cacheCounts['AuthorizationPolicy'] = [{ Tenant: 'client.example', Type: 'AuthorizationPolicy', Count: 1, LastRefresh: '2026-10-17T15:00:00Z', ...TRAP }];
+      const res = await exec({ type: 'AuthorizationPolicy', countsOnly: true });
+      expect(json(res).Results).toEqual([{ Tenant: 'client.example', Type: 'AuthorizationPolicy', Count: 1, LastRefresh: '2026-10-17T15:00:00Z' }]);
+      expect(text(res)).not.toMatch(/SECRET-VALUE-1|EXTRA-FIELD/);
+    });
+    it('a long result is cut at the row cap and says so', async () => {
+      const body = await results('OAuth2PermissionGrants', Array.from({ length: AUDIT_MAX_ROWS + 3 }, (_, i) => ({ id: `g${i}` })));
+      expect(body.Results).toHaveLength(AUDIT_MAX_ROWS);
+      expect(body.returned).toBe(AUDIT_MAX_ROWS + 3);
+      expect(body.truncated).toBe(true);
+      expect(body.truncatedFields).toEqual(['Results (rows)']);
+    });
+    it('a non-list answer from CIPP is an error, never passed through raw', async () => {
+      fetchMock.mockImplementation((url) =>
+        Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? spec : { Results: 'CIPP says no', secretText: 'SECRET-VALUE-1' }))
+      );
+      catalogueStore.reset();
+      const res = await exec({ type: 'AuthorizationPolicy' });
+      expect(res.isError).toBe(true);
+      expect(text(res)).not.toContain('SECRET-VALUE-1');
+    });
+  });
+
   it('cipp_exec_write cannot run ListDBCache at all (read tier)', async () => {
     const res = await exec({ type: 'AuthorizationPolicy' }, WRITE, 'cipp_exec_write');
     expect(res.isError).toBe(true);
@@ -645,8 +865,14 @@ describe('ListDBCache type allow-list through cipp_exec_read', () => {
   });
 
   it('restrictDbCache is a pure check on the arguments', () => {
-    expect(restrictDbCache({ tenantFilter: 't', type: 'oauth2permissiongrants' })).toEqual({ ok: true, args: { tenantFilter: 't', type: 'OAuth2PermissionGrants' } });
+    expect(restrictDbCache({ tenantFilter: 't', type: 'oauth2permissiongrants' })).toEqual({
+      ok: true,
+      args: { tenantFilter: 't', type: 'OAuth2PermissionGrants' },
+      type: 'OAuth2PermissionGrants',
+      countsOnly: false,
+    });
     expect(restrictDbCache({ tenantFilter: 't' }).ok).toBe(false);
+    expect(restrictDbCache({ type: 'AuthorizationPolicy' }).ok).toBe(false);
   });
 });
 
