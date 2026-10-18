@@ -123,6 +123,8 @@ To reach any CIPP endpoint, use the catalogue tools:
 - cipp_sync_sharepoint_sharing: refresh the SharePoint/OneDrive sharing caches behind ListSharePointSharing
   for ONE tenant (listed for everyone). The one write-type action open to the read tier: fixed caches only,
   no AllTenants, at most once per tenant every 15 minutes. Use it when linksSynced is false or the data is old.
+- cipp_message_trace: Exchange message trace for ONE tenant (listed for everyone). Needs a sender and/or
+  recipient address and covers up to 10 days; subjects are removed by policy.
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
 Named tools that can change data are listed only when your tier allows them, and are disabled at launch.

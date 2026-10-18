@@ -21,6 +21,7 @@ import {
 import { buildGraphRequest } from './graph.js';
 import { endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
 import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
+import { MESSAGE_TRACE_TOOL_DEFINITION, MESSAGE_TRACE_TOOL_NAME, runMessageTrace } from './message-trace.js';
 import { runSharingSync, SHARING_SYNC_TOOL_DEFINITION, SHARING_SYNC_TOOL_NAME } from './sharing-sync.js';
 import {
   APP_DISABLE_TOOL_DEFINITION,
@@ -46,6 +47,7 @@ export const META_TOOL_NAMES = [
   'cipp_exec_write',
   'cipp_graph_request',
   SHARING_SYNC_TOOL_NAME,
+  MESSAGE_TRACE_TOOL_NAME,
   APP_DISABLE_TOOL_NAME,
   APP_ENABLE_TOOL_NAME,
 ] as const;
@@ -142,6 +144,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
     annotations: { title: 'Read from Microsoft Graph via CIPP', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   },
   SHARING_SYNC_TOOL_DEFINITION,
+  MESSAGE_TRACE_TOOL_DEFINITION,
   APP_DISABLE_TOOL_DEFINITION,
   APP_ENABLE_TOOL_DEFINITION,
 ];
@@ -314,6 +317,10 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
     case SHARING_SYNC_TOOL_NAME:
       // Read-tier exception to the write-tier ExecCIPPDBCache: fixed cache names, one tenant, cooldown (sharing-sync.ts).
       return runSharingSync(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
+
+    case MESSAGE_TRACE_TOOL_NAME:
+      // The only route to the disabled ListMessageTrace: one tenant, sender/recipient required, subjects removed (message-trace.ts).
+      return runMessageTrace(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
 
     case APP_DISABLE_TOOL_NAME:
     case APP_ENABLE_TOOL_NAME:
