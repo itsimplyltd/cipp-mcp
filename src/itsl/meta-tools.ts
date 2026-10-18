@@ -19,9 +19,11 @@ import {
   SpecFetcher,
 } from './catalogue.js';
 import { buildGraphRequest } from './graph.js';
-import { endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
+import { AUDIT_TOOL_ENDPOINTS, endpointTier, KNOWN_ENDPOINT_ROLES, NAMED_TOOL_ENDPOINTS, namedToolTier, RoleLookup } from './named-tools.js';
 import { CallerTier, computeTier, isCallable, refusalReason, Tier } from './tier.js';
 import { MESSAGE_TRACE_TOOL_DEFINITION, MESSAGE_TRACE_TOOL_NAME, runMessageTrace } from './message-trace.js';
+import { AUDIT_TOOL_DEFINITIONS, AUDIT_TOOL_NAMES, projectDbCacheResult, restrictDbCache, runAuditTool } from './audit-tools.js';
+import { truncateError } from './frame.js';
 import { runSharingSync, SHARING_SYNC_TOOL_DEFINITION, SHARING_SYNC_TOOL_NAME } from './sharing-sync.js';
 import {
   APP_DISABLE_TOOL_DEFINITION,
@@ -48,6 +50,7 @@ export const META_TOOL_NAMES = [
   'cipp_graph_request',
   SHARING_SYNC_TOOL_NAME,
   MESSAGE_TRACE_TOOL_NAME,
+  ...AUDIT_TOOL_NAMES,
   APP_DISABLE_TOOL_NAME,
   APP_ENABLE_TOOL_NAME,
 ] as const;
@@ -145,6 +148,7 @@ export const META_TOOL_DEFINITIONS: MetaToolDefinition[] = [
   },
   SHARING_SYNC_TOOL_DEFINITION,
   MESSAGE_TRACE_TOOL_DEFINITION,
+  ...AUDIT_TOOL_DEFINITIONS,
   APP_DISABLE_TOOL_DEFINITION,
   APP_ENABLE_TOOL_DEFINITION,
 ];
@@ -288,7 +292,19 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       }
       const canon = canonicaliseArguments(entry, (callArgs ?? {}) as Record<string, unknown>);
       if (!canon.ok) return text(`Refused: ${canon.reason}`, true);
-      const finalArgs = canon.args;
+      let finalArgs = canon.args;
+      // ListDBCache serves cached tenant data of many kinds: one tenant, reviewed cache types only, three arguments
+      // only (policy.ts, audit-tools.ts), and the rows are projected below.
+      let dbCache: { type: string; countsOnly: boolean } | undefined;
+      if (entry.name.toLowerCase() === 'listdbcache') {
+        const restricted = restrictDbCache(finalArgs);
+        if (!restricted.ok) {
+          logRefusal(deps, name, entry.name, tier);
+          return text(`Refused: ${restricted.reason}`, true);
+        }
+        finalArgs = restricted.args;
+        dbCache = { type: restricted.type, countsOnly: restricted.countsOnly };
+      }
       if (want === 'write' && hasAllTenants(finalArgs)) {
         logRefusal(deps, name, entry.name, tier);
         return text('Refused: AllTenants is not allowed on write-tier calls - run it per tenant.', true);
@@ -296,6 +312,13 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
       const { params, body } = routeArguments(entry, finalArgs);
       deps.logger.info('CIPP exec', { target: entry.name, tier, callerTier: deps.ctx.tier, user: deps.ctx.user });
       const result = await deps.service.callEndpoint(entry.method, entry.name, params, body);
+      if (dbCache) {
+        try {
+          return text(projectDbCacheResult(dbCache.type, dbCache.countsOnly, result));
+        } catch (err) {
+          return text(truncateError(err instanceof Error ? err.message : String(err)), true);
+        }
+      }
       return text(result);
     }
 
@@ -321,6 +344,22 @@ export async function runMetaTool(name: string, args: Record<string, unknown>, d
     case MESSAGE_TRACE_TOOL_NAME:
       // The only route to the disabled ListMessageTrace: one tenant, sender/recipient required, subjects removed (message-trace.ts).
       return runMessageTrace(args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
+
+    case 'cipp_get_authorization_policy':
+    case 'cipp_list_delegated_grants':
+    case 'cipp_list_app_role_assignments':
+    case 'cipp_list_app_registrations':
+    case 'cipp_get_consent_policies':
+    case 'cipp_get_cross_tenant_policy':
+    case 'cipp_get_outbound_spam_policy': {
+      // Fixed, projected, read-only audit reads (audit-tools.ts); tier computed from the endpoints each one calls.
+      const decision = namedToolDecision(name, deps.ctx, deps.store ?? catalogueStore);
+      if (!decision?.allowed) {
+        logRefusal(deps, name, name, decision?.tier ?? 'unknown');
+        return text(decision?.reason ?? `Refused: '${name}' is not callable.`, true);
+      }
+      return runAuditTool(name, args, { service: deps.service, logger: deps.logger, ctx: deps.ctx });
+    }
 
     case APP_DISABLE_TOOL_NAME:
     case APP_ENABLE_TOOL_NAME:
@@ -364,7 +403,7 @@ function describe(e: CatalogueEntry) {
 /** Endpoints every named tool calls must have a row in the role table; used by tests and a boot check. */
 export function namedToolEndpointsMissingRoles(): string[] {
   const missing: string[] = [];
-  for (const eps of Object.values(NAMED_TOOL_ENDPOINTS)) {
+  for (const eps of [...Object.values(NAMED_TOOL_ENDPOINTS), ...Object.values(AUDIT_TOOL_ENDPOINTS)]) {
     for (const ep of eps) if (!(ep in KNOWN_ENDPOINT_ROLES)) missing.push(ep);
   }
   return [...new Set(missing)];
