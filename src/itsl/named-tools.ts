@@ -61,6 +61,22 @@ export const NAMED_TOOL_ENDPOINTS: Readonly<Record<string, readonly string[]>> =
 };
 
 /**
+ * Audit tools (audit-tools.ts): meta tools, kept apart from the WYRE named tools so the named-tool guard
+ * tests stay exact. Each fixed Graph read is a virtual 'ListGraphRequest#<what>' key like cipp_list_enterprise_apps
+ * ('ListGraphRequest' itself stays BLOCKED for the catalogue); the outbound spam policy reads ListDBCache.
+ * All are GET and CIPP.Core.Read, so a read-tier user is never refused by CIPP's own role check.
+ */
+export const AUDIT_TOOL_ENDPOINTS: Readonly<Record<string, readonly string[]>> = {
+  cipp_get_authorization_policy: ['ListGraphRequest#authorizationPolicy'],
+  cipp_list_delegated_grants: ['ListGraphRequest#oauth2PermissionGrants'],
+  cipp_list_app_role_assignments: ['ListGraphRequest#appRoleAssignments'],
+  cipp_list_app_registrations: ['ListGraphRequest#applications'],
+  cipp_get_consent_policies: ['ListGraphRequest#permissionGrantPolicies', 'ListGraphRequest#adminConsentRequestPolicy'],
+  cipp_get_cross_tenant_policy: ['ListGraphRequest#crossTenantAccessPolicy'],
+  cipp_get_outbound_spam_policy: ['ListDBCache'],
+};
+
+/**
  * x-cipp-role of each endpoint above, as published in CIPP's openapi.json
  * (CIPP-API master, 2026-10-10). Used when the live spec has not been loaded
  * (so `tools/list` and named tools never depend on the catalogue), and always
@@ -94,6 +110,14 @@ export const KNOWN_ENDPOINT_ROLES: Readonly<Record<string, string | undefined>> 
   ListConditionalAccessPolicies: 'Tenant.ConditionalAccess.Read',
   ListNamedLocations: 'Tenant.ConditionalAccess.Read',
   'ListGraphRequest#servicePrincipals': 'CIPP.Core.Read',
+  'ListGraphRequest#authorizationPolicy': 'CIPP.Core.Read',
+  'ListGraphRequest#oauth2PermissionGrants': 'CIPP.Core.Read',
+  'ListGraphRequest#appRoleAssignments': 'CIPP.Core.Read',
+  'ListGraphRequest#applications': 'CIPP.Core.Read',
+  'ListGraphRequest#permissionGrantPolicies': 'CIPP.Core.Read',
+  'ListGraphRequest#adminConsentRequestPolicy': 'CIPP.Core.Read',
+  'ListGraphRequest#crossTenantAccessPolicy': 'CIPP.Core.Read',
+  ListDBCache: 'CIPP.Core.Read',
   ListStandards: 'Tenant.Standards.Read',
   ExecStandardsRun: 'Tenant.Standards.ReadWrite',
   listStandardTemplates: 'Tenant.Standards.Read',
@@ -151,7 +175,7 @@ export function endpointTier(endpoint: string, liveRole?: RoleLookup): Tier {
  * calls. Unknown tool -> undefined.
  */
 export function namedToolTier(toolName: string, liveRole?: RoleLookup): Tier | undefined {
-  const endpoints = NAMED_TOOL_ENDPOINTS[toolName];
+  const endpoints = NAMED_TOOL_ENDPOINTS[toolName] ?? AUDIT_TOOL_ENDPOINTS[toolName];
   if (!endpoints) return undefined;
   return mostRestrictive(endpoints.map((ep) => endpointTier(ep, liveRole)));
 }

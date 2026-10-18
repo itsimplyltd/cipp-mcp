@@ -246,3 +246,220 @@ export const ITSL_OWN_TENANT_IDS: readonly string[] = [
   'caaf597f-c70a-428d-8dae-312ff86d1e23',
   'd751f643-98f0-452b-beb9-adf331942ce5',
 ];
+
+/**
+ * ListDBCache (CIPP's cached tenant data, read tier) is runnable through cipp_exec_read ONLY for the
+ * cache types listed here. A `type` that is missing, not a string, or not in this list is refused by
+ * name. Matching is case-insensitive and the canonical spelling below is what is sent to CIPP.
+ * Add a type only after reading what CIPP caches into it (Modules/CIPPDB/Public/DBCache/Set-CIPPDBCache<Type>.ps1).
+ *
+ * Every cache type CIPP defines (CIPP-API master 2026-10-18: the Set-CIPPDBCache*.ps1 names,
+ * Config/CIPPDBCacheTypes.json, and the types seen live), allowed or refused:
+ *
+ *   ActiveUserDetail                           refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   ActivityBasedTimeoutPolicy                 refused: not reviewed for the read tier; add after review
+ *   AdminConsentRequestPolicy                  allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   AdministrativeUnits                        refused: not reviewed for the read tier; add after review
+ *   AdminReportSettings                        refused: not reviewed for the read tier; add after review
+ *   AppRoleAssignments                         allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   Apps                                       refused: owner profiles are expanded into each row (PII); use cipp_list_app_registrations
+ *   AppsAndServices                            refused: not reviewed for the read tier; add after review
+ *   AuthenticationFlowsPolicy                  refused: not reviewed for the read tier; add after review
+ *   AuthenticationMethodsPolicy                refused: not reviewed for the read tier; add after review
+ *   AuthenticationStrengths                    refused: not reviewed for the read tier; add after review
+ *   AuthorizationPolicy                        allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   AutopilotDeploymentProfiles                refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   B2BManagementPolicy                        refused: not reviewed for the read tier; add after review
+ *   BitlockerKeys                              refused: BitLocker recovery key records; the BitLocker endpoints are blocked by name, so this stays refused too
+ *   CalendarPermissions                        refused: calendar sharing by person; use ListCalendarPermissions
+ *   CASMailbox                                 refused: mailbox or contact data per person; use the live mailbox tools
+ *   CASMailboxes                               refused: mailbox or contact data per person; use the live mailbox tools
+ *   ComplianceRetentionPolicies                refused: not reviewed for the read tier; add after review
+ *   ComplianceRetentionRules                   refused: not reviewed for the read tier; add after review
+ *   ConditionalAccessPolicies                  refused: not reviewed for the read tier; add after review
+ *   CopilotAdminSettings                       refused: not reviewed for the read tier; add after review
+ *   CopilotPolicySettings                      refused: not reviewed for the read tier; add after review
+ *   CopilotReadinessActivity                   refused: not reviewed for the read tier; add after review
+ *   CopilotUsageUserDetail                     refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   CopilotUserCountSummary                    refused: not reviewed for the read tier; add after review
+ *   CopilotUserCountTrend                      refused: not reviewed for the read tier; add after review
+ *   CredentialUserRegistrationDetails          refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   CrossTenantAccessPolicy                    allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   CsExternalAccessPolicy                     refused: not reviewed for the read tier; add after review
+ *   CsTeamsAppPermissionPolicy                 refused: not reviewed for the read tier; add after review
+ *   CsTeamsClientConfiguration                 refused: not reviewed for the read tier; add after review
+ *   CsTeamsFilesPolicy                         refused: not reviewed for the read tier; add after review
+ *   CsTeamsMeetingPolicy                       refused: not reviewed for the read tier; add after review
+ *   CsTeamsMessagingConfiguration              refused: not reviewed for the read tier; add after review
+ *   CsTeamsMessagingPolicy                     refused: not reviewed for the read tier; add after review
+ *   CsTenantFederationConfiguration            refused: not reviewed for the read tier; add after review
+ *   DefaultAppManagementPolicy                 refused: not reviewed for the read tier; add after review
+ *   DefenderCVEs                               refused: not reviewed for the read tier
+ *   DetectedApps                               refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   DeviceEnrollmentConfigurations             refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   DeviceRegistrationPolicy                   refused: not reviewed for the read tier; add after review
+ *   Devices                                    refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   DeviceSettings                             refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   DirectoryRecommendations                   refused: not reviewed for the read tier
+ *   DlpCompliancePolicies                      refused: not reviewed for the read tier; add after review
+ *   DlpComplianceRules                         refused: not reviewed for the read tier; add after review
+ *   DomainAnalyser                             refused: not reviewed for the read tier; add after review
+ *   Domains                                    refused: not reviewed for the read tier; add after review
+ *   ExoAcceptedDomains                         refused: not reviewed for the read tier; add after review
+ *   ExoAdminAuditLogConfig                     refused: not reviewed for the read tier; add after review
+ *   ExoAntiPhishPolicies                       refused: not reviewed for the read tier; add after review
+ *   ExoAntiPhishRules                          refused: not reviewed for the read tier; add after review
+ *   ExoAtpPolicyForO365                        refused: not reviewed for the read tier; add after review
+ *   ExoCASMailboxSmtpAuth                      refused: mailbox or contact data per person; use the live mailbox tools
+ *   ExoDkimSigningConfig                       refused: not reviewed for the read tier; add after review
+ *   ExoDlpSensitiveInfoTypes                   refused: not reviewed for the read tier; add after review
+ *   ExoDynamicDistributionGroup                refused: mailbox or contact data per person; use the live mailbox tools
+ *   ExoExternalInOutlook                       refused: not reviewed for the read tier; add after review
+ *   ExoGlobalQuarantinePolicy                  refused: not reviewed for the read tier; add after review
+ *   ExoHostedConnectionFilterPolicy            refused: not reviewed for the read tier; add after review
+ *   ExoHostedContentFilterPolicy               refused: not reviewed for the read tier; add after review
+ *   ExoHostedContentFilterRule                 refused: not reviewed for the read tier; add after review
+ *   ExoHostedOutboundSpamFilterPolicy          allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   ExoInboundConnector                        refused: not reviewed for the read tier; add after review
+ *   ExoIRMConfiguration                        refused: not reviewed for the read tier; add after review
+ *   ExoLabelPolicies                           refused: not reviewed for the read tier; add after review
+ *   ExoLabels                                  refused: not reviewed for the read tier; add after review
+ *   ExoMailboxPlans                            refused: mailbox or contact data per person; use the live mailbox tools
+ *   ExoMailContacts                            refused: mailbox or contact data per person; use the live mailbox tools
+ *   ExoMalwareFilterPolicies                   refused: not reviewed for the read tier; add after review
+ *   ExoMalwareFilterRules                      refused: not reviewed for the read tier; add after review
+ *   ExoOMEConfiguration                        refused: not reviewed for the read tier; add after review
+ *   ExoOrganizationConfig                      refused: not reviewed for the read tier; add after review
+ *   ExoOutboundConnector                       refused: not reviewed for the read tier; add after review
+ *   ExoPhishSimConfig                          refused: not reviewed for the read tier; add after review
+ *   ExoPhishSimOverridePolicy                  refused: not reviewed for the read tier; add after review
+ *   ExoPhishSimOverrideRule                    refused: not reviewed for the read tier; add after review
+ *   ExoPhishSimUrlAllowItems                   refused: not reviewed for the read tier; add after review
+ *   ExoPresetSecurityPolicy                    refused: not reviewed for the read tier; add after review
+ *   ExoProtectionAlert                         refused: not reviewed for the read tier; add after review
+ *   ExoQuarantinePolicy                        refused: not reviewed for the read tier; add after review
+ *   ExoRemoteDomain                            refused: not reviewed for the read tier; add after review
+ *   ExoRetentionPolicies                       refused: not reviewed for the read tier; add after review
+ *   ExoRetentionPolicyTags                     refused: not reviewed for the read tier; add after review
+ *   ExoRoleAssignmentPolicy                    refused: not reviewed for the read tier; add after review
+ *   ExoSafeAttachmentPolicies                  refused: not reviewed for the read tier; add after review
+ *   ExoSafeAttachmentRules                     refused: not reviewed for the read tier; add after review
+ *   ExoSafeLinksPolicies                       refused: not reviewed for the read tier; add after review
+ *   ExoSafeLinksRules                          refused: not reviewed for the read tier; add after review
+ *   ExoSharingPolicy                           refused: not reviewed for the read tier; add after review
+ *   ExoTeamsProtectionPolicy                   refused: not reviewed for the read tier; add after review
+ *   ExoTenantAllowBlockList                    refused: not reviewed for the read tier; add after review
+ *   ExoTenantAllowBlockListSpoofItems          refused: not reviewed for the read tier; add after review
+ *   ExoTransportConfig                         refused: not reviewed for the read tier; add after review
+ *   ExoTransportRules                          refused: not reviewed for the read tier; add after review
+ *   Fido2Configuration                         refused: not reviewed for the read tier; add after review
+ *   FormsSettings                              refused: not reviewed for the read tier; add after review
+ *   Groups                                     refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   GroupUsage                                 refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   Guests                                     refused: per-user profile data; use ListUsers
+ *   HomeRealmDiscoveryPolicy                   refused: not reviewed for the read tier; add after review
+ *   HVEAccounts                                refused: mailbox or contact data per person; use the live mailbox tools
+ *   IntuneAppInstallStatus                     refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneAppleUserInitiatedEnrollmentProfiles refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneApplications                         refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneAppProtectionPolicies                refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneAssignmentFilters                    refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneBrandingProfile                      refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneCompliancePolicies                   refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneConfigurationPolicies                refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneDataProcessorOnboarding              refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneDeviceEnrollmentConfigurations       refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneDeviceManagementSettings             refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneMobileApps                           refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneMobileAppsAll                        refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntunePolicies                             refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneReusableSettings                     refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneScripts                              refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   IntuneWindowsAutopilotDeploymentProfiles   refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   LicenseOverview                            refused: not reviewed for the read tier; add after review
+ *   M365AppUserDetail                          refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   Mailboxes                                  refused: mailbox or contact data per person; use the live mailbox tools
+ *   MailboxMessageConfiguration                refused: mailbox or contact data per person; use the live mailbox tools
+ *   MailboxPermissions                         refused: mailbox access lists by person; use cipp_list_mailbox_permissions
+ *   MailboxRules                               refused: inbox rule bodies can quote mail content; use the live endpoint
+ *   MailboxUsage                               refused: mailbox or contact data per person; use the live mailbox tools
+ *   MailTrafficSummary                         refused: not reviewed for the read tier
+ *   ManagedDeviceCleanupRules                  refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   ManagedDeviceEncryptionStates              refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   ManagedDevices                             refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   MDEOnboarding                              refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   MessageCenterMessages                      refused: not reviewed for the read tier
+ *   MFAState                                   refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   MobileDeviceManagementPolicies             refused: Intune and device configuration (can carry scripts and secrets); not reviewed
+ *   MoeraDmarc                                 refused: not reviewed for the read tier; add after review
+ *   NamedLocations                             refused: not reviewed for the read tier; add after review
+ *   NamePronunciation                          refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   NetworkAccess                              refused: not reviewed for the read tier; add after review
+ *   OAuth2PermissionGrants                     allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   OfficeActivations                          refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   OneDriveLongPaths                          refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   OneDriveQuotas                             refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   OneDriveRootPermissions                    refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   OneDriveRootShortcuts                      refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   OneDriveSiteListing                        refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   OneDriveUsage                              refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   Organization                               refused: not reviewed for the read tier; add after review
+ *   OrganizationBranding                       refused: not reviewed for the read tier; add after review
+ *   OwaMailboxPolicy                           refused: not reviewed for the read tier; add after review
+ *   PeopleInsights                             refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   PermissionGrantPolicies                    allowed: Graph/Exchange policy configuration, no secrets or personal data
+ *   PhotoUpdateSettings                        refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   PIMAssignments                             refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   PIMRoleSettings                            refused: not reviewed for the read tier; add after review
+ *   PIMSettings                                refused: not reviewed for the read tier; add after review
+ *   PlannerUserPolicies                        refused: not reviewed for the read tier; add after review
+ *   Pronouns                                   refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   ReportSubmissionPolicy                     refused: not reviewed for the read tier; add after review
+ *   ReportSubmissionRule                       refused: not reviewed for the read tier; add after review
+ *   RiskDetections                             refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RiskyServicePrincipals                     refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RiskyUsers                                 refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RoleAssignments                            refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RoleAssignmentScheduleInstances            refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RoleDefinitions                            refused: not reviewed for the read tier; add after review
+ *   RoleEligibilitySchedules                   refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RoleManagementPolicies                     refused: not reviewed for the read tier; add after review
+ *   Roles                                      refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   RolesAndAssignments                        refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   SecureScore                                refused: not reviewed for the read tier
+ *   SecureScoreControlProfiles                 refused: not reviewed for the read tier
+ *   SecurityDefaults                           refused: not reviewed for the read tier; add after review
+ *   SelfServicePurchaseProducts                refused: not reviewed for the read tier; add after review
+ *   SensitivityLabels                          refused: not reviewed for the read tier; add after review
+ *   ServiceHealthIssues                        refused: not reviewed for the read tier
+ *   ServiceHealthOverviews                     refused: not reviewed for the read tier
+ *   ServicePrincipalRiskDetections             refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   ServicePrincipals                          refused: whole beta service principals (large); use cipp_list_enterprise_apps
+ *   Settings                                   refused: not reviewed for the read tier; add after review
+ *   SharePointAdminSettings                    refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SharePointPermissions                      refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SharePointSharingLinks                     refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SharePointSiteListing                      refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SharePointSiteUsage                        refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SharePointUsageReport                      refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SiteActivity                               refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SPOSites                                   refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   SPOTenant                                  refused: not reviewed for the read tier; add after review
+ *   SPOTenantSyncClientRestriction             refused: not reviewed for the read tier; add after review
+ *   StorageCleanupScan                         refused: site, file or sharing names (customer content); use the live sharing and site tools
+ *   Teams                                      refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   TeamsActivity                              refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   TeamsActivityTeamsUserActivityUser         refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   TeamsResourceAccounts                      refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   TeamsVoice                                 refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   UserRegistrationDetails                    refused: per-person or per-device records; not reviewed for the read tier (use the live endpoint)
+ *   Users                                      refused: per-user profiles, licences and contact data; use ListUsers */
+export const DBCACHE_ALLOWED_TYPES: readonly string[] = [
+  'AuthorizationPolicy',
+  'OAuth2PermissionGrants',
+  'AppRoleAssignments',
+  'PermissionGrantPolicies',
+  'AdminConsentRequestPolicy',
+  'CrossTenantAccessPolicy',
+  'ExoHostedOutboundSpamFilterPolicy',
+];

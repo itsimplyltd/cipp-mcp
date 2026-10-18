@@ -125,6 +125,15 @@ To reach any CIPP endpoint, use the catalogue tools:
   no AllTenants, at most once per tenant every 15 minutes. Use it when linksSynced is false or the data is old.
 - cipp_message_trace: Exchange message trace for ONE tenant (listed for everyone). Needs a sender and/or
   recipient address and covers up to 10 days; subjects are removed by policy.
+- cipp_get_authorization_policy: live Entra authorization policy for ONE tenant (default user permissions incl. agent-identity-blueprint creation, guest invites, SSPR), projected.
+- cipp_list_delegated_grants: live delegated OAuth2 permission grants for ONE tenant (clientId, resourceId, consentType, principalId, scope).
+- cipp_list_app_role_assignments: live app role assignments of ONE service principal (GUID) in ONE tenant.
+- cipp_list_app_registrations: live app registrations for ONE tenant with credential lifetimes (never secret values) and owners (id, UPN).
+- cipp_get_consent_policies: live user app-consent policies and the admin consent request workflow for ONE tenant.
+- cipp_get_cross_tenant_policy: live default cross-tenant access policy (inbound trust, B2B collaboration and direct connect) for ONE tenant.
+- cipp_get_outbound_spam_policy: Exchange outbound spam policy for ONE tenant; CIPP's CACHED copy (up to ~24 h old, cachedAt says when), refreshed by the write-tier sync.
+  These seven take one tenant (never AllTenants) and no other arguments, and return only a fixed set of fields.
+  cipp_exec_read can run ListDBCache only for a short list of reviewed cache types; other types are refused.
 
 Named tools (cipp_list_users, cipp_list_mailboxes, ...) are shortcuts for common endpoints.
 Named tools that can change data are listed only when your tier allows them, and are disabled at launch.
