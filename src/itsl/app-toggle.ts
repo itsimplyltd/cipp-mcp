@@ -8,10 +8,11 @@
 //
 // Before writing, the service principal is read through ListGraphRequest (the same
 // read-only path cipp_graph_request uses, built by graph.ts) and refused when it is a
-// Microsoft first-party app, an app owned by IT Simply's tenant, anything other than an
-// 'Application' service principal, or not found. After writing it is read again, and the
-// call only reports success when Graph shows the requested state: CIPP can answer 200
-// with a failure in Results.
+// Microsoft first-party app, an app owned by an IT Simply tenant, anything other than an
+// 'Application' service principal, or not found. The pre-read never skips the write (it
+// can be a stale replica). After writing, the app is re-read with backoff: success when
+// Entra shows the requested state, a non-error "accepted, not yet visible" when CIPP took
+// the write but replication has not caught up, and an error only when the write failed.
 
 import type { CatalogueLogger } from './catalogue.js';
 import type { ToolContext } from './meta-tools.js';
@@ -27,8 +28,11 @@ export const APP_TOGGLE_TOOL_NAMES = [APP_DISABLE_TOOL_NAME, APP_ENABLE_TOOL_NAM
 /** The fields the pre-read and the re-read select. */
 export const SP_SELECT = 'id,appId,displayName,accountEnabled,appOwnerOrganizationId,servicePrincipalType';
 
-/** Re-read policy after the write (Graph can lag a moment behind its own PATCH). Mutable for tests. */
-export const appToggleTiming = { attempts: 3, delayMs: 2000 };
+/**
+ * Re-read schedule after the write: wait, read, stop at the first confirmation (37 s in all).
+ * Entra replication lagged past 3 x 2 s in the first live test (2026-10-18). Mutable for tests.
+ */
+export const appToggleTiming = { delaysMs: [2000, 5000, 10000, 20000] };
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TENANT = /^[A-Za-z0-9._-]{1,255}$/;
@@ -49,7 +53,7 @@ const inputSchema = {
 export const APP_DISABLE_TOOL_DEFINITION = {
   name: APP_DISABLE_TOOL_NAME,
   description:
-    "Disable one enterprise application (service principal) in ONE client tenant, so nobody can sign in to it (accountEnabled false). Write tier only. Takes the service principal's object id. Refuses Microsoft first-party apps, apps owned by IT Simply's tenant, managed identities and other non-Application types. Reports before and after; reversible with cipp_enable_enterprise_app.",
+    "Disable one enterprise application (service principal) in ONE client tenant, so nobody can sign in to it (accountEnabled false). Write tier only. Takes the service principal's object id. Refuses Microsoft first-party apps, apps owned by IT Simply's tenants, managed identities and other non-Application types. Reports before and after; reversible with cipp_enable_enterprise_app.",
   inputSchema,
   annotations: {
     title: 'Disable an enterprise application',
@@ -156,7 +160,7 @@ function protectedReason(sp: ServicePrincipal): string | undefined {
     return 'its appOwnerOrganizationId is missing or not a GUID, so it cannot be checked against the protected tenants.';
   }
   if (MS_SET.has(owner.toLowerCase())) return 'it is a Microsoft first-party application.';
-  if (ITSL_SET.has(owner.toLowerCase())) return "it is owned by IT Simply's own tenant (IT Simply tooling such as the gateway, data gateway, CIPP SAM or Practice Intelligence).";
+  if (ITSL_SET.has(owner.toLowerCase())) return "it is owned by an IT Simply tenant (IT Simply or Practice Intelligence), so it is IT Simply tooling.";
   if (sp.servicePrincipalType !== 'Application') {
     return `its servicePrincipalType is '${String(sp.servicePrincipalType).slice(0, 40)}', not 'Application' (managed identities, legacy and social identity principals are refused).`;
   }
@@ -215,9 +219,9 @@ export async function runAppToggle(name: string, args: Record<string, unknown>, 
   if (why) return refuse(`'${String(sp.displayName).slice(0, 100)}' (${sp.id}) cannot be ${verb} here: ${why} Nothing was changed.`, { tenant, id: sp.id });
 
   const report = { tenant, id: sp.id, appId: sp.appId, displayName: sp.displayName };
-  if (sp.accountEnabled === desired) {
-    return out({ ...report, before: sp.accountEnabled, after: sp.accountEnabled, result: `already ${verb}` });
-  }
+  // NEVER skip the write because the pre-read already shows the requested state: that read
+  // can be a stale replica (an enable sent straight after a disable once read "enabled" and
+  // left the app disabled). Setting accountEnabled is idempotent, so the PATCH always goes.
 
   // The write: the one fixed shape. Payload is an object, as CIPP's own UI sends it
   // (Invoke-ExecApplication runs `$Request.Body.Payload | ConvertTo-Json`; a string would be
@@ -227,39 +231,58 @@ export async function runAppToggle(name: string, args: Record<string, unknown>, 
   let writeFailed = false;
   let cippResults: string;
   try {
-    cippResults = cippResultsText(await deps.service.callEndpoint('POST', 'ExecApplication', undefined, body));
+    const raw = await deps.service.callEndpoint('POST', 'ExecApplication', undefined, body);
+    cippResults = cippResultsText(raw);
+    // CIPP answers 500 when Graph refuses, but a 200 whose Results say state 'error' is a failure too.
+    writeFailed = reportsError(raw);
   } catch (err) {
     writeFailed = true;
     cippResults = truncateError(errText(err));
   }
 
-  // Re-read until Graph shows the requested state, a fixed number of times. Never writes again.
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  let after: ReadOutcome = { kind: 'error', message: 'not read' };
-  const attempts = writeFailed ? 1 : Math.max(1, appToggleTiming.attempts);
-  for (let i = 0; i < attempts; i++) {
-    if (i > 0 && appToggleTiming.delayMs > 0) await sleep(appToggleTiming.delayMs);
-    after = await readSp(tenant, sp.id, deps);
-    if (after.kind === 'found' && after.sp.accountEnabled === desired) break;
-  }
-  const afterState = after.kind === 'found' ? after.sp.accountEnabled : null;
-  if (!writeFailed && afterState === desired) {
-    return out({ ...report, before: sp.accountEnabled, after: afterState });
-  }
-  deps.logger.warn('CIPP enterprise app toggle did not take effect', { tool: name, tenant, id: sp.id, writeFailed, user: deps.ctx.user });
-  return out(
-    {
-      ...report,
-      before: sp.accountEnabled,
-      after: afterState,
-      error:
-        afterState === null
-          ? `The service principal could not be re-read after the write, so it is not confirmed ${verb}. ${truncateError(after.kind === 'error' ? after.message : 'not found')}`
-          : afterState === desired
+  const readState = (o: ReadOutcome): boolean | null => (o.kind === 'found' ? o.sp.accountEnabled : null);
+
+  if (writeFailed) {
+    // One read, to report where the app stands. Never writes again.
+    const afterState = readState(await readSp(tenant, sp.id, deps));
+    deps.logger.warn('CIPP enterprise app toggle failed', { tool: name, tenant, id: sp.id, user: deps.ctx.user });
+    return out(
+      {
+        ...report,
+        before: sp.accountEnabled,
+        after: afterState,
+        error:
+          afterState === desired
             ? `CIPP reported the write as failed, but Graph now shows accountEnabled ${String(afterState)}. Check the app before acting again.`
-            : `The service principal is not ${verb}: accountEnabled is ${String(afterState)} after the write.`,
-      cippResults,
-    },
-    true
-  );
+            : `CIPP reported the write as failed; the service principal is not confirmed ${verb}.`,
+        cippResults,
+      },
+      true
+    );
+  }
+
+  // Poll with backoff until Entra shows the requested state (replication lags the PATCH). Never writes again.
+  let lastRead: boolean | null = null;
+  for (const delay of appToggleTiming.delaysMs) {
+    if (delay > 0) await sleep(delay);
+    lastRead = readState(await readSp(tenant, sp.id, deps));
+    if (lastRead === desired) return out({ ...report, before: sp.accountEnabled, after: lastRead });
+  }
+  // CIPP accepted the write; Entra has not shown it yet. Not an error.
+  deps.logger.info('CIPP enterprise app toggle accepted, not yet visible', { tool: name, tenant, id: sp.id, user: deps.ctx.user });
+  return out({
+    ...report,
+    before: sp.accountEnabled,
+    lastRead,
+    status: `write accepted by CIPP; Entra has not yet shown the new state (replication can take up to a minute) - re-check with cipp_graph_request servicePrincipals/${sp.id}`,
+    cippResults,
+  });
+}
+
+/** True when a 200 from ExecApplication still carries state 'error' in its Results. */
+function reportsError(raw: unknown): boolean {
+  const results = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>)['Results'] : undefined;
+  const list = Array.isArray(results) ? results : [results];
+  return list.some((r) => r !== null && typeof r === 'object' && String((r as Record<string, unknown>)['state']).toLowerCase() === 'error');
 }

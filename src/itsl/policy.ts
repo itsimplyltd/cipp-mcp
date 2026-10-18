@@ -235,8 +235,14 @@ export const MICROSOFT_FIRST_PARTY_TENANT_IDS: readonly string[] = [
 ];
 
 /**
- * IT Simply's own tenant. It owns the apps our tooling runs on in every client tenant: the MCP
- * gateway, the data gateway, the CIPP SAM app and Practice Intelligence. Disabling one of them
- * through this server would cut IT Simply (and this server) off from the client.
+ * IT Simply's own tenants. They own the apps our tooling runs on in client tenants. Disabling
+ * one of them through this server would cut IT Simply (and this server) off from the client.
+ *  - caaf597f-c70a-428d-8dae-312ff86d1e23: IT Simply (itsimply.co.nz). The MCP gateway, data
+ *    gateway, CIPP SAM and Practice Intelligence app registrations.
+ *  - d751f643-98f0-452b-beb9-adf331942ce5: Practice Intelligence (practiceintelligence.co.nz).
+ *    Owns e.g. the "Sandbox" app found in a client tenant in the 2026-10-18 live test.
  */
-export const ITSL_OWN_TENANT_IDS: readonly string[] = ['caaf597f-c70a-428d-8dae-312ff86d1e23'];
+export const ITSL_OWN_TENANT_IDS: readonly string[] = [
+  'caaf597f-c70a-428d-8dae-312ff86d1e23',
+  'd751f643-98f0-452b-beb9-adf331942ce5',
+];
