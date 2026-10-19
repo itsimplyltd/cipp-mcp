@@ -30,7 +30,9 @@ export interface CacheSyncResult {
 
 export interface CacheSyncSpec {
   toolName: string;
-  /** Cache names posted to ExecCIPPDBCache, in order. Fixed in code. */
+  /** CIPP endpoint the cache names are posted to. Defaults to ExecCIPPDBCache. Fixed in code. */
+  endpoint?: string;
+  /** Cache names posted to the endpoint, in order. Fixed in code. */
   cacheNames: readonly string[];
   cooldownMs: number;
   /** Short noun for messages, e.g. 'sharing sync'. */
@@ -86,7 +88,7 @@ export function createCacheSync(spec: CacheSyncSpec): {
     const results: Array<{ cache: string; ok: boolean; result: unknown }> = [];
     for (const name of spec.cacheNames) {
       try {
-        const r = await deps.service.callEndpoint('POST', 'ExecCIPPDBCache', { Name: name, tenantFilter: tenant });
+        const r = await deps.service.callEndpoint('POST', spec.endpoint ?? 'ExecCIPPDBCache', { Name: name, tenantFilter: tenant });
         results.push({ cache: name, ok: true, result: r });
       } catch (err) {
         results.push({ cache: name, ok: false, result: err instanceof Error ? err.message : String(err) });

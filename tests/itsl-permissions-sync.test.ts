@@ -10,12 +10,14 @@ import { CippService } from '../src/services/cipp.service.js';
 import { CippToolHandler } from '../src/handlers/tool.handler.js';
 import { Logger } from '../src/utils/logger.js';
 import { catalogueStore } from '../src/itsl/catalogue.js';
+import { computeTier } from '../src/itsl/tier.js';
 import { ToolContext } from '../src/itsl/meta-tools.js';
 import { clearSharingSyncCooldowns } from '../src/itsl/sharing-sync.js';
 import {
   clearPermissionsSyncCooldowns,
   PERMISSIONS_CACHE_NAMES,
   PERMISSIONS_SYNC_COOLDOWN_MS,
+  PERMISSIONS_SYNC_ENDPOINT,
   runPermissionsSync,
 } from '../src/itsl/permissions-sync.js';
 import { jsonResponse } from './helpers.js';
@@ -47,6 +49,20 @@ describe('listing', () => {
     for (const ctx of [READ, WRITE]) expect(handler(ctx).getToolDefinitions().map((t) => t.name)).toContain(TOOL);
   });
 
+  it('ExecSharePointPermissionsSync is not a generic tool: never read tier', async () => {
+    // POST, role Sharepoint.Reports.ReadWrite (CIPP 11.2.1 spec): not read, not on the write allow-list.
+    expect(computeTier('ExecSharePointPermissionsSync', 'Sharepoint.Reports.ReadWrite', { hasGet: false })).not.toBe('read');
+    expect(computeTier('ExecSharePointPermissionsSync', 'Sharepoint.Reports.ReadWrite')).not.toBe('read');
+    for (const tool of ['cipp_exec_read', 'cipp_exec_write']) {
+      const res = await handler(READ).handleToolCall(tool, {
+        name: 'ExecSharePointPermissionsSync',
+        arguments: { Name: 'SharePointPermissions', tenantFilter: 't.example' },
+      });
+      expect(res.isError).toBe(true);
+    }
+    expect(cippCalls().filter(([u]) => u.includes('ExecSharePointPermissionsSync'))).toEqual([]);
+  });
+
   it('read callers still cannot reach ExecCIPPDBCache directly', async () => {
     const res = await handler(READ).handleToolCall('cipp_exec_write', {
       name: 'ExecCIPPDBCache',
@@ -58,13 +74,15 @@ describe('listing', () => {
 });
 
 describe('a read caller runs the sync', () => {
-  it('posts ExecCIPPDBCache with Name SharePointPermissions and the tenant, once', async () => {
+  it('posts the dedicated ExecSharePointPermissionsSync with Name SharePointPermissions and the tenant, once', async () => {
     const res = await handler(READ).handleToolCall(TOOL, { tenantFilter: 'aviva.org.nz' });
     expect(res.isError).toBeUndefined();
     const calls = cippCalls();
     expect(calls).toHaveLength(1);
     const [u, init] = calls[0]!;
-    expect(u).toContain('/api/ExecCIPPDBCache');
+    expect(u).toContain('/api/ExecSharePointPermissionsSync');
+    expect(u).not.toContain('ExecCIPPDBCache');
+    expect(PERMISSIONS_SYNC_ENDPOINT).toBe('ExecSharePointPermissionsSync');
     expect(init?.method).toBe('POST');
     expect(new URL(u).searchParams.get('Name')).toBe('SharePointPermissions');
     expect(new URL(u).searchParams.get('tenantFilter')).toBe('aviva.org.nz');

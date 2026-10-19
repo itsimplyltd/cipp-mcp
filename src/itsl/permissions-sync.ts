@@ -7,10 +7,21 @@
 // cache name is fixed here. policy.ts still refuses SharePointPermissions in the
 // ListDBCache allow-list (a read of customer content): this only triggers the
 // refresh. The mechanics live in cache-sync.ts.
+//
+// It calls CIPP's dedicated ExecSharePointPermissionsSync (POST, CIPP role
+// Sharepoint.Reports.ReadWrite, present in the spec from CIPP 11.2.1; our live
+// CIPP is 11.2.1). It accepts only Name=SharePointPermissions plus one tenant and
+// forwards to ExecCIPPDBCache. That is narrower than ExecCIPPDBCache, which needs
+// CIPP.Core.ReadWrite. computeTier classifies ExecSharePointPermissionsSync as
+// disabled, so it is not reachable through cipp_exec_read or cipp_exec_write; this
+// tool is the only route. A CIPP older than 11.2.1 has no such endpoint and the
+// call would 404.
 
 import { createCacheSync } from './cache-sync.js';
 
 /** The one cache Get-CIPPSharePointPermissionsReport reads. */
+export const PERMISSIONS_SYNC_ENDPOINT = 'ExecSharePointPermissionsSync';
+
 export const PERMISSIONS_CACHE_NAMES = ['SharePointPermissions'] as const;
 
 // 60 minutes, not the 15 of the sharing sync: this scan walks the permissions of
@@ -23,7 +34,7 @@ export const PERMISSIONS_SYNC_TOOL_NAME = 'cipp_sync_sharepoint_permissions';
 export const PERMISSIONS_SYNC_TOOL_DEFINITION = {
   name: PERMISSIONS_SYNC_TOOL_NAME,
   description:
-    "Refresh CIPP's SharePoint permissions scan for ONE tenant (the SharePointPermissions cache behind ListSharePointPermissions: site and library permission assignments, broad claims, external grants, unique-permission libraries). Use it when ListSharePointPermissions has no data or an old scan. Available at the read tier. One tenant per call (AllTenants is refused) and at most once per tenant every 60 minutes, because the scan walks every site. The sync runs in the background in CIPP and can take a long time on large tenants; re-read ListSharePointPermissions afterwards, and wait before heavy per-site reads such as ListSiteBrowserPermissions, which throttle while a sync is running. CIPP still applies your own CIPP role.",
+    "Refresh CIPP's SharePoint permissions scan for ONE tenant (the SharePointPermissions cache behind ListSharePointPermissions: site and library permission assignments, broad claims, external grants, unique-permission libraries). Use it when ListSharePointPermissions has no data or an old scan. Available at the read tier. One tenant per call (AllTenants is refused) and at most once per tenant every 60 minutes, because the scan walks every site. The sync runs in the background in CIPP and can take a long time on large tenants; re-read ListSharePointPermissions afterwards, and wait before heavy per-site reads such as ListSiteBrowserPermissions, which throttle while a sync is running. CIPP still applies your own CIPP role: Sharepoint.Reports.ReadWrite is needed.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -42,6 +53,7 @@ export const PERMISSIONS_SYNC_TOOL_DEFINITION = {
 
 const permissionsSync = createCacheSync({
   toolName: PERMISSIONS_SYNC_TOOL_NAME,
+  endpoint: PERMISSIONS_SYNC_ENDPOINT,
   cacheNames: PERMISSIONS_CACHE_NAMES,
   cooldownMs: PERMISSIONS_SYNC_COOLDOWN_MS,
   label: 'permissions sync',
