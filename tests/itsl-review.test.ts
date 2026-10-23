@@ -198,8 +198,8 @@ describe('rule 3: the read tier is GET-only', () => {
     for (const bad of ['clearcache', 'triggerrefresh', 'asapp']) expect(url.toLowerCase()).not.toContain(bad);
   });
 
-  it('POST-only .Read entries, ExecBECCheck and ListAuditLogSearches are disabled at both tiers', async () => {
-    for (const name of ['ListPostOnlyRead', 'ExecBECCheck', 'ListAuditLogSearches']) {
+  it('POST-only .Read entries, ExecBECCheck, ListAuditLogSearches and ListAuditLogTest are disabled at both tiers', async () => {
+    for (const name of ['ListPostOnlyRead', 'ExecBECCheck', 'ListAuditLogSearches', 'ListAuditLogTest']) {
       for (const ctx of [READ, WRITE]) {
         const res = await handler(ctx).handleToolCall('cipp_exec_read', { name });
         expect(res.isError).toBe(true);
