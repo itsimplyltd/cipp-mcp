@@ -693,6 +693,18 @@
         "parameters": []
       }
     },
+    "/api/ListAuditLogTest": {
+      "get": {
+        "summary": "Audit log test",
+        "operationId": "Audit log test",
+        "tags": [
+          "CIPP > Core"
+        ],
+        "description": "Audit log test",
+        "x-cipp-role": "Tenant.Alert.Read",
+        "parameters": []
+      }
+    },
     "/api/ExecListBackup": {
       "get": {
         "summary": "ExecListBackup",

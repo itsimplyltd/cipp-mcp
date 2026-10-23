@@ -149,6 +149,8 @@ describe('projection and tiers over the fixture spec', () => {
     expect(tier('ListPostOnlyRead')).toBe('disabled');
     expect(tier('ExecBECCheck')).toBe('disabled');
     expect(tier('ListAuditLogSearches')).toBe('disabled');
+    // GET + .Read role would make it `read`; FORCE_DISABLED overrides (audit record content)
+    expect(tier('ListAuditLogTest')).toBe('disabled');
     for (const n of ['ListSomeBackupThing', 'ListRoleBackupOnly']) expect(tier(n)).toBe('blocked');
     expect(tier('ListSneakyReadWrite')).toBe('disabled');
     expect(tier('AddTestReport')).toBe('disabled');

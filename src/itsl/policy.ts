@@ -151,13 +151,20 @@ export const GRAPH_DENY_TERMS: readonly string[] = [
 ];
 
 /**
- * Endpoints that carry a `.Read` role but change state (RULING, security review):
- * forced to `disabled` regardless of the read rule or the reviewed map.
- *  - ListAuditLogSearches: its default branch creates a unified-audit-log search.
+ * Endpoints that carry a `.Read` role but must not be reachable at any tier
+ * (RULING, security review): forced to `disabled` regardless of the read rule
+ * or the reviewed map.
+ *  - ListAuditLogSearches: Type=SearchResults returns raw unified-audit-log
+ *    records (full auditData: mail subjects, recipients, folder paths, file
+ *    names, sharing targets), unprojected. (At CIPP 11.2.1 it does not create
+ *    a search - ExecAuditLogSearch does - but the content is the reason.)
+ *  - ListAuditLogTest: returns the same audit records, processed, in
+ *    DataToProcess. Disabled 2026-10-23 (Grant): it had been reachable at the
+ *    read tier through cipp_exec_read.
  *  - ExecBECCheck: starts a BEC investigation.
  * Blocked still wins over this list.
  */
-export const FORCE_DISABLED: readonly string[] = ['ListAuditLogSearches', 'ExecBECCheck'];
+export const FORCE_DISABLED: readonly string[] = ['ListAuditLogSearches', 'ListAuditLogTest', 'ExecBECCheck'];
 
 /**
  * Graph path SEGMENTS that are customer content (mail, calendar, files, chats,
