@@ -11,7 +11,7 @@ import fixture from './fixtures/openapi-fixture.json';
 import { signV1, signV2, signV3, encodeUser } from './s2s-v3-signer.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
 
-const SECRET = 'test-s2s-v3-http-secret-0123456789abcdef';
+const SECRET = 'test-s2s-v3-http-secret-do-not-use-in-prod';
 const HOST = '127.0.0.1';
 const PORT = 47534;
 const TOKEN = 'eyJ.user-token-for-v3-http-tests.sig';
@@ -166,7 +166,7 @@ describe('S2S v2 + v3 at the HTTP boundary (floor 2)', () => {
     });
 
     it('a v3 signed for another audience or with the wrong secret is refused', async () => {
-      expect((await rawPost(v3(listTools, identity('read'), {}, { secret: 'wrong-secret-0123456789abcdef-0123456789' }), listTools)).status).toBe(401);
+      expect((await rawPost(v3(listTools, identity('read'), {}, { secret: 'wrong-secret-must-not-verify-at-all-12' }), listTools)).status).toBe(401);
       const wrongAud = { 'x-gateway-s2s': signV3(SECRET, { aud: 'other', method: 'POST', path: '/mcp', body: JSON.stringify(listTools), headers: identity('read') }), ...identity('read') };
       expect((await rawPost(wrongAud, listTools)).status).toBe(401);
     });
