@@ -319,13 +319,19 @@ Tool categories:
           ...shared,
         };
         void handleGatewayRequest(req, res, opts, ({ version, parsedBody }) => {
-          const toolContext: ToolContext =
-            version === 2 && legacyIdentity
-              ? { tier: legacyIdentity.tier, user: legacyIdentity.user }
-              : {
-                  tier: tierFromHeader(headerValue(req.headers[TIER_HEADER])),
-                  user: userFromHeader(headerValue(req.headers[USER_HEADER])),
-                };
+          const fromV2 = version === 2 ? legacyIdentity : undefined;
+          const tier: CallerTier = fromV2 ? fromV2.tier : tierFromHeader(headerValue(req.headers[TIER_HEADER]));
+          const user = fromV2 ? fromV2.user : userFromHeader(headerValue(req.headers[USER_HEADER]));
+          // v3 only: never serve an anonymous write. (v2 already binds the user.)
+          if (version === 3 && tier === 'write' && !user) {
+            if (shared.failureLimiter.shouldEmit('write-without-user')) {
+              this.logger.warn('S2S verification failed', { reason: 'write-without-user' });
+            }
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end('{"error":"Missing or invalid X-Gateway-S2S header"}');
+            return;
+          }
+          const toolContext: ToolContext = { tier, user };
           this.handleMcpRequest(req, res, parsedBody, toolContext, isGatewayMode);
         });
         return;
@@ -492,7 +498,8 @@ Tool categories:
     server
       .connect(transport as any)
       .then(() => {
-        transport.handleRequest(req, res, parsedBody);
+        // Returned, so a rejection reaches the catch below instead of being dropped.
+        return transport.handleRequest(req, res, parsedBody);
       })
       .catch((err) => {
         this.logger.error('MCP transport connect error:', err);

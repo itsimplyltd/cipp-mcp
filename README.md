@@ -261,7 +261,7 @@ user=<upn>")`.
 | Env var | Effect |
 |---|---|
 | `CONDUIT_S2S_SECRET` | S2S secret, required in HTTP mode (at least 32 characters; the server refuses to start without it) |
-| `ITSL_S2S_MIN_VERSION` | Minimum S2S version, `2` (default) or `3`. The floor is 2 in code: v1 is never accepted. |
+| `ITSL_S2S_MIN_VERSION` | Minimum S2S version: `2` (default) or `3`. `1` is not a valid setting for this backend: the floor is 2 in code, so a value of 1 is silently raised to 2 and v1 is never accepted. Anything that is not 1 to 3 counts as 3. |
 | `ITSL_REQUIRE_S2S_V2` | Deprecated and ignored (logged at boot): v2 is now the floor |
 | `ITSL_REQUIRE_USER_TOKEN` | `true`: any request without `x-user-token` gets 401 |
 | `ITSL_SPEC_PATH` | CIPP endpoint serving the OpenAPI spec (default `ListOpenApiSpec`) |

@@ -251,6 +251,39 @@ describe('S2S v2 + v3 at the HTTP boundary (floor 2)', () => {
     });
   });
 
+  describe('anonymous write and transport failures', () => {
+    it('a signed write tier with no x-mcp-user is a 401, logged, and never reaches CIPP', async () => {
+      const { 'x-mcp-user': _u, ...rest } = identity('write');
+      void _u;
+      const body = callTool('cipp_exec_write', { name: 'ExecCIPPDBCache', arguments: { Name: 'SharePointSharingLinks', tenantFilter: 'aviva.org.nz' } });
+      const res = await rawPost(v3(body, rest), body);
+      expect(res.status).toBe(401);
+      expect(await res.text()).not.toMatch(/user/i);
+      expect(logs.some((l) => l.level === 'warn' && l.line.includes('write-without-user'))).toBe(true);
+      expect(upstreamCalls).toEqual([]);
+      // read tier with no user is still served (it cannot write)
+      const { 'x-mcp-user': _u2, ...readRest } = identity('read');
+      void _u2;
+      expect((await rawPost(v3(listTools, readRest), listTools)).status).toBe(200);
+    });
+
+    it('a handleRequest rejection becomes a 500 and the server keeps serving', async () => {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const spy = jest.spyOn(StreamableHTTPServerTransport.prototype, 'handleRequest').mockRejectedValueOnce(new Error('boom'));
+      try {
+        const res = await rawPost(v3(listTools, identity('read')), listTools);
+        expect(res.status).toBe(500);
+        expect(spy).toHaveBeenCalledTimes(1);
+      } finally {
+        spy.mockRestore();
+      }
+      expect((await realFetch(`http://${HOST}:${PORT}/health`)).status).toBe(200);
+      expect((await rawPost(v3(listTools, identity('read')), listTools)).status).toBe(200);
+    });
+  });
+
   describe('v2 behaves as it did before', () => {
     it('refuses a flipped tier header, a swapped token and a forged user', async () => {
       expect((await rawPost({ ...v2('read'), 'x-mcp-tier': 'write' }, listTools)).status).toBe(401);
