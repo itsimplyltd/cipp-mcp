@@ -31,7 +31,7 @@
 // getAccessToken()/fetchToken() logic are all exercised for real. This is
 // the strongest form available without a live Entra tenant.
 
-import { createHmac } from 'node:crypto';
+import { signV3 } from './s2s-v3-signer.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
 import type { TokenProvider as TokenProviderType } from '../src/services/token.service.js';
 
@@ -40,10 +40,9 @@ const TEST_PORT = 47531;
 const TEST_S2S_SECRET = 'test-s2s-guard-ordering-secret-do-not-use-in-prod';
 const WRONG_S2S_SECRET = 'wrong-secret-must-not-verify';
 
-function mintS2sHeader(secret: string, unixSeconds: number): string {
-  const message = `t=${unixSeconds}`;
-  const hex = createHmac('sha256', secret).update(message).digest('hex');
-  return `${message},v1=${hex}`;
+/** A v3 signature over the exact body and the gateway credential headers that are sent. */
+function mintS2sHeader(secret: string, body: Record<string, unknown>): string {
+  return signV3(secret, { aud: 'cipp', method: 'POST', path: '/mcp', body: JSON.stringify(body), headers: GATEWAY_OAUTH_HEADERS });
 }
 
 /** Valid-shaped (but fake) gateway OAuth credential headers for CIPP. */
@@ -176,13 +175,13 @@ describe('S2S guard ordering vs. lazy CIPP OAuth exchange', () => {
   });
 
   it('rejects a request with an invalid S2S header with 401, before any CIPP OAuth exchange', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const body = { jsonrpc: '2.0', method: 'tools/call', params: { name: 'cipp_ping', arguments: {} }, id: 2 };
     const res = await postToMcp(
       {
         ...GATEWAY_OAUTH_HEADERS,
-        'x-gateway-s2s': mintS2sHeader(WRONG_S2S_SECRET, now),
+        'x-gateway-s2s': mintS2sHeader(WRONG_S2S_SECRET, body),
       },
-      { jsonrpc: '2.0', method: 'tools/call', params: { name: 'cipp_ping', arguments: {} }, id: 2 }
+      body
     );
 
     expect(res.status).toBe(401);
@@ -194,13 +193,13 @@ describe('S2S guard ordering vs. lazy CIPP OAuth exchange', () => {
   // if the spy were broken (e.g. spying on the wrong class, or a stale
   // module reference), this test would fail to see a call and catch it.
   it('control: a request with a VALID S2S header reaches the real tool handler and DOES call TokenProvider.getAccessToken', async () => {
-    const now = Math.floor(Date.now() / 1000);
+    const body = { jsonrpc: '2.0', method: 'tools/call', params: { name: 'cipp_ping', arguments: {} }, id: 3 };
     const res = await postToMcp(
       {
         ...GATEWAY_OAUTH_HEADERS,
-        'x-gateway-s2s': mintS2sHeader(TEST_S2S_SECRET, now),
+        'x-gateway-s2s': mintS2sHeader(TEST_S2S_SECRET, body),
       },
-      { jsonrpc: '2.0', method: 'tools/call', params: { name: 'cipp_ping', arguments: {} }, id: 3 }
+      body
     );
 
     expect(res.status).toBe(200);
