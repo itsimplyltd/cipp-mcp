@@ -74,7 +74,7 @@ jobs:
           mkdir "$RUNNER_TEMP/gitleaks"
           tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks" gitleaks
       - name: gitleaks (full history)
-        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git --redact --no-banner --exit-code 1'
+        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git --redact --verbose --no-banner --exit-code 1'
 
   # Build only, never pushed: push: false, no registry login, no publish credentials.
   # AUTH_MODE=gateway means the server takes credentials per request, so it boots with no secrets at all. HTTP startup also refuses to boot without CONDUIT_S2S_SECRET, so the smoke test generates a throwaway one.
