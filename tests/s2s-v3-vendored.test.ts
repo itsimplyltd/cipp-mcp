@@ -25,9 +25,9 @@ import {
   assertRequireSignedHeaders,
 } from '../src/itsl/s2s-v3.js';
 
-// sha256 of itsimplyltd/MCP-Gateway s2s/s2s-v3.ts at commit f88a2e3 (branch feat/s2s-v3-cipp, PR 54).
+// sha256 of itsimplyltd/MCP-Gateway s2s/s2s-v3.ts at commit c3a395e (branch feat/s2s-v3-ingress-exempt, PR 55).
 // Changing the vendored file means re-vendoring the canonical copy, never editing it here.
-const CANONICAL_S2S_V3_SHA256 = '2242015a1df00772b695dddb1a49bee4af36cf139672a40d329394fed3a95374';
+const CANONICAL_S2S_V3_SHA256 = '3160ee243febcf990c4eb84f514c254a7d9a98592fa1d9b53888f1ad0dde11b0';
 
 describe('vendored verifier pin', () => {
   it('src/itsl/s2s-v3.ts is byte-identical to the canonical copy', () => {
@@ -167,7 +167,7 @@ describe('verifier behaviour', () => {
     expect(c.rawHeaders.some((h: string) => h.toLowerCase() === 'x-request-id')).toBe(true);
     expect(c.header.includes('x-request-id')).toBe(false);
     expect(verifyV3(args(c, new NonceCache()))).toEqual({ ok: true, version: 3 });
-    expect(INGRESS_EXEMPT_HEADERS).toEqual(['x-request-id']);
+    expect(INGRESS_EXEMPT_HEADERS).toEqual(['x-request-id', 'x-arr-ssl', 'x-envoy-expected-rq-timeout-ms', 'x-envoy-external-address', 'x-forwarded-for', 'x-forwarded-path', 'x-forwarded-proto', 'x-k8se-app-kind', 'x-k8se-app-name', 'x-k8se-app-namespace', 'x-k8se-protocol', 'x-ms-containerapp-name', 'x-ms-containerapp-revision-name']);
   });
 
   it('a request refused by the header rule does not consume a nonce or a slot', () => {
@@ -182,8 +182,8 @@ describe('verifier behaviour', () => {
   it('report mode accepts and consumes the nonce, listing names; exempt names are never listed', () => {
     const cache = new NonceCache();
     const c = vectors.positive[1];
-    const r = verifyV3({ ...args(c, cache), headerRuleMode: 'report', rawHeaders: [...c.rawHeaders, 'X-Forwarded-For', '1.2.3.4'] });
-    expect(r).toEqual({ ok: true, version: 3, unsignedHeaderNames: ['x-forwarded-for'] });
+    const r = verifyV3({ ...args(c, cache), headerRuleMode: 'report', rawHeaders: [...c.rawHeaders, 'X-Example-Unsigned', '1', 'X-Forwarded-For', '1.2.3.4'] });
+    expect(r).toEqual({ ok: true, version: 3, unsignedHeaderNames: ['x-example-unsigned'] });
     expect(cache.entries.size).toBe(1);
   });
 

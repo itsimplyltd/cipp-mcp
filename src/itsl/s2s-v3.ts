@@ -27,7 +27,7 @@ export type VerifyFailure = { ok: false; reason: string };
 // wildcards, anywhere. cred-router's signer (cred-router/src/s2sV3.js) holds a
 // copy and a test keeps the two equal. Call stripExemptHeaders() after a
 // successful verification so the application never sees an unsigned value.
-export const INGRESS_EXEMPT_HEADERS: string[] = ['x-request-id'];
+export const INGRESS_EXEMPT_HEADERS: string[] = ['x-request-id', 'x-arr-ssl', 'x-envoy-expected-rq-timeout-ms', 'x-envoy-external-address', 'x-forwarded-for', 'x-forwarded-path', 'x-forwarded-proto', 'x-k8se-app-kind', 'x-k8se-app-name', 'x-k8se-app-namespace', 'x-k8se-protocol', 'x-ms-containerapp-name', 'x-ms-containerapp-revision-name'];
 
 const nowSecondsDefault = (): number => Math.floor(Date.now() / 1000);
 
