@@ -8,8 +8,7 @@ jest.mock('../src/itsl/tenant.js', () => ({
 
 import { createHmac } from 'node:crypto';
 import fixture from './fixtures/openapi-fixture.json';
-import { decideS2s, encodeMcpUser, sha256Hex, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';
-import { verifyS2sHeader } from '../src/s2s-verify.js';
+import { encodeMcpUser, sha256Hex, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';
 import { parseCredentialsFromHeaders } from '../src/utils/config.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
 
@@ -98,35 +97,6 @@ describe('verifyS2sV2', () => {
   });
 });
 
-describe('decideS2s', () => {
-  const base = { tierHeader: 'write', userHeader: 'u@example.com', tokenHeader: TOK, verifyV1: verifyS2sHeader };
-
-  it('requireV2: unsigned, v1-only, forged and secretless requests are refused', () => {
-    const t = nowS();
-    const u = 'u@example.com';
-    expect(decideS2s({ ...base, header: undefined, secret: SECRET, requireV2: true }).ok).toBe(false);
-    expect(decideS2s({ ...base, header: v1(SECRET, t), secret: SECRET, requireV2: true }).ok).toBe(false);
-    expect(decideS2s({ ...base, header: sign('read', u), secret: SECRET, requireV2: true }).ok).toBe(false); // tier header says write
-    expect(decideS2s({ ...base, header: sign('write', u), secret: '', requireV2: true }).ok).toBe(false);
-    expect(decideS2s({ ...base, header: 'garbage', secret: SECRET, requireV2: true }).ok).toBe(false);
-    expect(decideS2s({ ...base, tokenHeader: 'other', header: sign('write', u), secret: SECRET, requireV2: true }).ok).toBe(false);
-  });
-
-  it('requireV2: a valid v2 passes and yields the signed tier and decoded user', () => {
-    const out = decideS2s({ ...base, userHeader: 'jos%C3%A9@x.nz', header: sign('write', 'jos%C3%A9@x.nz'), secret: SECRET, requireV2: true });
-    expect(out).toEqual({ ok: true, tier: 'write', user: 'josé@x.nz', version: 'v2' });
-  });
-
-  it('v2 not required: v1 still verifies but a forged tier header is NOT trusted (tier read)', () => {
-    const out = decideS2s({ ...base, header: v1(SECRET, nowS()), secret: SECRET, requireV2: false });
-    expect(out).toEqual({ ok: true, tier: 'read', user: undefined, version: 'v1' });
-  });
-
-  it('v2 not required and no secret (local dev): allowed, tier read', () => {
-    expect(decideS2s({ ...base, header: undefined, secret: '', requireV2: false })).toEqual({ ok: true, tier: 'read', user: undefined, version: 'none' });
-  });
-});
-
 describe('x-user-token parsing', () => {
   it('becomes the only credential; x-api-key and client credentials are dropped', () => {
     const c = parseCredentialsFromHeaders({
@@ -159,7 +129,7 @@ describe('x-user-token parsing', () => {
 const HOST = '127.0.0.1';
 const PORT = 47533;
 const TOKEN = 'eyJ.user-token-that-must-never-be-logged.sig';
-const ENV_KEYS = ['CONDUIT_S2S_SECRET', 'ITSL_REQUIRE_S2S_V2', 'ITSL_REQUIRE_USER_TOKEN', 'AUTH_MODE', 'MCP_TRANSPORT', 'MCP_HTTP_PORT', 'MCP_HTTP_HOST'];
+const ENV_KEYS = ['CONDUIT_S2S_SECRET', 'ITSL_REQUIRE_USER_TOKEN', 'AUTH_MODE', 'MCP_TRANSPORT', 'MCP_HTTP_PORT', 'MCP_HTTP_HOST'];
 
 describe('server HTTP boundary', () => {
   let server: InstanceType<typeof CippMcpServerType>;
@@ -200,7 +170,6 @@ describe('server HTTP boundary', () => {
   beforeAll(async () => {
     Object.assign(process.env, {
       CONDUIT_S2S_SECRET: SECRET,
-      ITSL_REQUIRE_S2S_V2: 'true',
       ITSL_REQUIRE_USER_TOKEN: 'true',
       AUTH_MODE: 'gateway',
       MCP_TRANSPORT: 'http',
