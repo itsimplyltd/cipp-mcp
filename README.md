@@ -260,8 +260,9 @@ user=<upn>")`.
 
 | Env var | Effect |
 |---|---|
-| `CONDUIT_S2S_SECRET` | S2S secret (as upstream) |
-| `ITSL_REQUIRE_S2S_V2` | `true`: only a verified v2 header is accepted; tier defaults to read otherwise |
+| `CONDUIT_S2S_SECRET` | S2S secret, required in HTTP mode (at least 32 characters; the server refuses to start without it) |
+| `ITSL_S2S_MIN_VERSION` | Minimum S2S version: `2` (default) or `3`. `1` is not a valid setting for this backend: the floor is 2 in code, so a value of 1 is silently raised to 2 and v1 is never accepted. Anything that is not 1 to 3 counts as 3. |
+| `ITSL_REQUIRE_S2S_V2` | Deprecated and ignored (logged at boot): v2 is now the floor |
 | `ITSL_REQUIRE_USER_TOKEN` | `true`: any request without `x-user-token` gets 401 |
 | `ITSL_SPEC_PATH` | CIPP endpoint serving the OpenAPI spec (default `ListOpenApiSpec`) |
 | `ITSL_SPEC_GITHUB_REPO` | Fallback spec repo (default `KelvinTegelaar/CIPP-API`) |
@@ -277,8 +278,8 @@ The S2S v2 string also binds `sha256(x-user-token)`; `x-mcp-user` arrives percen
 
 Guard tests (`tests/itsl-*.test.ts`) fail the build if a blocked name is callable,
 a `ReadWrite` endpoint computes to read, a read caller can run a write entry, a
-write tool becomes reachable, or an unsigned/v1-only request is accepted with
-`ITSL_REQUIRE_S2S_V2=true`.
+write tool becomes reachable, or an unsigned/v1-only request is accepted.
+(S2S v3 carries the tier, user, token and credential headers inside its signature; a v3 request with one of them present but unsigned is refused.)
 
 ## License
 

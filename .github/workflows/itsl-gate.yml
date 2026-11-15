@@ -74,10 +74,10 @@ jobs:
           mkdir "$RUNNER_TEMP/gitleaks"
           tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/gitleaks" gitleaks
       - name: gitleaks (full history)
-        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git --redact --no-banner --exit-code 1'
+        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git --redact --verbose --no-banner --exit-code 1'
 
   # Build only, never pushed: push: false, no registry login, no publish credentials.
-  # AUTH_MODE=gateway means the server takes credentials per request, so it boots with no secrets at all.
+  # AUTH_MODE=gateway means the server takes credentials per request, so it boots with no secrets at all. HTTP startup also refuses to boot without CONDUIT_S2S_SECRET, so the smoke test generates a throwaway one.
   docker-build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -100,6 +100,7 @@ jobs:
           docker run -d --name smoke -p 8080:8080 \
             -e MCP_TRANSPORT=http \
             -e AUTH_MODE=gateway \
+            -e CONDUIT_S2S_SECRET="$(openssl rand -hex 32)" \
             itsl-docker-build:pr
           ok=0
           for i in $(seq 1 30); do

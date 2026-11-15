@@ -16,20 +16,58 @@ import { Logger } from '../utils/logger.js';
 import { McpServerConfig } from '../types/index.js';
 import { EnvironmentConfig, parseCredentialsFromHeaders } from '../utils/config.js';
 import { CippToolHandler } from '../handlers/tool.handler.js';
-import { verifyS2sHeader, S2S_HEADER } from '../s2s-verify.js';
-import { decideS2s, TIER_HEADER, TOKEN_HEADER, USER_HEADER } from '../itsl/s2s-v2.js';
+import { verifyS2sV2, TIER_HEADER, TOKEN_HEADER, USER_HEADER } from '../itsl/s2s-v2.js';
+import {
+  NonceCache,
+  ReportRateLimiter,
+  assertRequireSignedHeaders,
+  handleGatewayRequest,
+  type GatewayOptions,
+} from '../itsl/s2s-v3.js';
+import type { CallerTier } from '../itsl/tier.js';
 import { ToolContext } from '../itsl/meta-tools.js';
 
-// Conduit service-to-service auth (gateway#377 parity). Non-empty =
-// enforce X-Gateway-S2S on every /mcp request; empty = disabled, behavior
-// exactly as before (dark-by-default until the gateway provisions this
-// container's derived subkey). See src/s2s-verify.ts.
-// IT Simply: read per request (not at import) so the policy below can be
-// exercised under test; production sets it once at container start.
-const s2sSecret = (): string => process.env.CONDUIT_S2S_SECRET || '';
+// Gateway service-to-service auth. IT Simply: S2S v2 and v3 only, floor 2. The
+// v1 verifier (src/s2s-verify.ts) is deliberately NOT wired: v1 signs only a
+// timestamp, so it can never bind tier, user or token. HTTP mode refuses to
+// start without a secret of at least 32 characters, and there is no
+// unauthenticated escape hatch.
+const S2S_AUDIENCE = 'cipp';
+const S2S_FLOOR = 2;
+const MIN_S2S_SECRET_LENGTH = 32;
+// Every header the backend trusts for identity or credentials. Whenever one is
+// present on a v3 request it must be covered by the signature (so a header
+// injected past the gateway can never be honoured). The gateway never sends
+// the last seven today; they are listed so the whole configuration surface is
+// closed from the start. Absence is safe (see tierFromHeader and the tests).
+export const REQUIRE_SIGNED_HEADERS = [
+  'x-mcp-tier',
+  'x-mcp-user',
+  'x-user-token',
+  'x-base-url',
+  'x-api-key',
+  'x-tenant-id',
+  'x-client-id',
+  'x-client-secret',
+  'x-token-scope',
+  'x-token-scope-fallback',
+  'x-token-url',
+];
 const envFlag = (name: string): boolean => (process.env[name] || '').trim().toLowerCase() === 'true';
 
 const headerValue = (v: string | string[] | undefined): string | undefined => (Array.isArray(v) ? v[0] : v);
+
+// v3 identity: the headers are guaranteed signed when present (REQUIRE_SIGNED_HEADERS).
+// An absent or unexpected tier is read, never write.
+const tierFromHeader = (v: string | undefined): CallerTier => (v === 'write' ? 'write' : 'read');
+const userFromHeader = (v: string | undefined): string | undefined => {
+  if (!v) return undefined;
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return undefined;
+  }
+};
 
 export class CippMcpServer {
   private server: Server;
@@ -214,192 +252,88 @@ Tool categories:
     const host = this.envConfig?.transport?.host || '0.0.0.0';
     const isGatewayMode = this.envConfig?.auth?.mode === 'gateway';
 
-    this.httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
-      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const secret = process.env.CONDUIT_S2S_SECRET || '';
+    if (secret.length < MIN_S2S_SECRET_LENGTH) {
+      const msg =
+        'Refusing to start HTTP server: CONDUIT_S2S_SECRET is missing or shorter than 32 characters. ' +
+        'This server only accepts requests signed by the gateway.';
+      this.logger.error(msg);
+      throw new Error(msg);
+    }
+    if (process.env.ITSL_REQUIRE_S2S_V2 !== undefined) {
+      this.logger.warn(
+        'ITSL_REQUIRE_S2S_V2 is deprecated and ignored: S2S v2 is now the floor (v1 is never accepted).'
+      );
+    }
+    assertRequireSignedHeaders(REQUIRE_SIGNED_HEADERS);
 
-      if (url.pathname === '/health') {
+    // One nonce cache and one set of limiters for the life of the process.
+    const shared = {
+      nonceCache: new NonceCache(),
+      reportLimiter: new ReportRateLimiter(),
+      failureLimiter: new ReportRateLimiter(),
+    };
+    const gatewayLogger = {
+      warn: (msg: string, meta?: Record<string, unknown>) => this.logger.warn(msg, meta),
+      error: (msg: string, meta?: Record<string, unknown>) => this.logger.error(msg, meta),
+      debug: (msg: string, meta?: Record<string, unknown>) => this.logger.debug(msg, meta),
+    };
+
+    this.httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+      const path = (req.url || '/').split('?')[0];
+
+      if (path === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok' }));
         return;
       }
 
-      if (url.pathname === '/mcp') {
-        // Conduit service-to-service auth (gateway#377 parity): rejected
-        // BEFORE any credential extraction (OAuth or static key), mirroring
-        // every other ported wrapper (e.g.
-        // containers/sentinelone-mcp/gateway_wrapper.py).
-        // IT Simply: the decision also yields the caller's tier and user, which
-        // are trusted ONLY from a verified v2 signature (see src/itsl/s2s-v2.ts).
-        const s2s = decideS2s({
-          header: headerValue(req.headers[S2S_HEADER]),
-          secret: s2sSecret(),
-          requireV2: envFlag('ITSL_REQUIRE_S2S_V2'),
-          tierHeader: headerValue(req.headers[TIER_HEADER]),
-          userHeader: headerValue(req.headers[USER_HEADER]),
-          tokenHeader: headerValue(req.headers[TOKEN_HEADER]),
-          verifyV1: verifyS2sHeader,
-        });
-        if (!s2s.ok) {
-          this.logger.warn('S2S check failed', { reason: s2s.reason });
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              error: 'Missing or invalid X-Gateway-S2S header: this endpoint only accepts requests signed by the gateway.',
-            })
-          );
-          return;
-        }
-        const toolContext: ToolContext = { tier: s2s.tier, user: s2s.user };
-
-        if (req.method !== 'POST') {
-          res.writeHead(405, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              error: { code: -32000, message: 'Method not allowed' },
-              id: null,
-            })
-          );
-          return;
-        }
-
-        // IT Simply: with ITSL_REQUIRE_USER_TOKEN=true the per-user token is the
-        // only accepted credential. Checked before any credential parsing, so a
-        // request carrying client credentials but no x-user-token is refused.
-        if (envFlag('ITSL_REQUIRE_USER_TOKEN')) {
-          const hasUserToken = !!headerValue(req.headers['x-user-token'])?.trim();
-          if (!hasUserToken || !isGatewayMode) {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(
-              JSON.stringify({
-                error: 'Missing credentials',
-                message: isGatewayMode
-                  ? 'This server only accepts a per-user token in x-user-token.'
-                  : 'ITSL_REQUIRE_USER_TOKEN requires AUTH_MODE=gateway.',
-              })
+      // Exactly /mcp: S2S v3 binds the raw request target, and anything else is
+      // a 404 before any authentication work.
+      if (req.url === '/mcp') {
+        // Service-to-service auth runs FIRST, before any credential extraction.
+        // The ITSL_S2S_MIN_VERSION operator switch is read per request (it can only
+        // tighten: the floor is 2 in code, and an invalid value counts as 3).
+        let legacyIdentity: { tier: CallerTier; user: string } | undefined;
+        const opts: GatewayOptions = {
+          secret,
+          aud: S2S_AUDIENCE,
+          floor: S2S_FLOOR,
+          minVersion: Number(process.env.ITSL_S2S_MIN_VERSION ?? '2'),
+          // v2 binds tier, user and a hash of the token to the headers actually received.
+          // v1 is never offered.
+          verifyLegacy: (hv: string) => {
+            const id = verifyS2sV2(
+              hv,
+              secret,
+              headerValue(req.headers[TIER_HEADER]),
+              headerValue(req.headers[USER_HEADER]),
+              headerValue(req.headers[TOKEN_HEADER])
             );
-            return;
-          }
-        }
-
-        // Per-request handler so the caller's verified tier travels with the call.
-        let cippService = this.cippService;
-        let toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
-
-        if (isGatewayMode) {
-          const credentials = parseCredentialsFromHeaders(
-            req.headers as Record<string, string | string[] | undefined>
-          );
-
-          const hasOAuth =
-            !!credentials.tenantId && !!credentials.clientId && !!credentials.clientSecret;
-          const hasStatic = !!credentials.apiKey;
-
-          if (!credentials.baseUrl || (!hasStatic && !hasOAuth)) {
-            this.logger.warn('Gateway mode: Missing required credentials in request headers', {
-              hasBaseUrl: !!credentials.baseUrl,
-              hasApiKey: hasStatic,
-              hasOAuthCreds: hasOAuth,
-            });
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(
-              JSON.stringify({
-                error: 'Missing credentials',
-                message:
-                  'Gateway mode requires x-base-url plus either x-user-token, x-api-key or (x-tenant-id + x-client-id + x-client-secret)',
-                required: ['x-base-url', 'x-user-token OR x-api-key OR (x-tenant-id + x-client-id + x-client-secret)'],
-              })
-            );
-            return;
-          }
-
-          // Header wins; otherwise the process env (default on). `??` keeps an explicit false.
-          const tokenScopeFallback =
-            credentials.tokenScopeFallback ?? this.envConfig?.cipp.tokenScopeFallback;
-
-          const requestConfig: McpServerConfig = {
-            name: this.config.name,
-            version: this.config.version,
-            cipp: {
-              baseUrl: credentials.baseUrl,
-              ...(credentials.apiKey !== undefined ? { apiKey: credentials.apiKey } : {}),
-              ...(credentials.tenantId !== undefined ? { tenantId: credentials.tenantId } : {}),
-              ...(credentials.clientId !== undefined ? { clientId: credentials.clientId } : {}),
-              ...(credentials.clientSecret !== undefined ? { clientSecret: credentials.clientSecret } : {}),
-              ...(credentials.tokenScope !== undefined ? { tokenScope: credentials.tokenScope } : {}),
-              ...(credentials.tokenUrl !== undefined ? { tokenUrl: credentials.tokenUrl } : {}),
-              ...(tokenScopeFallback !== undefined ? { tokenScopeFallback } : {}),
-            },
-          };
-
-          cippService = new CippService(requestConfig, this.logger);
-          toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
-        }
-
-        const server = new Server(
-          { name: this.config.name, version: this.config.version },
-          {
-            capabilities: { tools: { listChanged: true } },
-            instructions: this.getServerInstructions(),
-          }
-        );
-
-        server.onerror = (error) => this.logger.error('MCP request server error:', error);
-
-        // Wire up handlers using the (possibly per-request) toolHandler
-        server.setRequestHandler(ListToolsRequestSchema, async () => ({
-          tools: toolHandler.getToolDefinitions(),
-        }));
-
-        server.setRequestHandler(CallToolRequestSchema, async (request) => {
-          this.logger.debug(`Handling tool call: ${request.params.name}`);
-          try {
-            const result = await toolHandler.handleToolCall(
-              request.params.name,
-              (request.params.arguments as Record<string, unknown>) || {}
-            );
-            return { content: result.content, isError: result.isError };
-          } catch (error) {
-            this.logger.error(`Failed to call tool ${request.params.name}:`, error);
-            const message = error instanceof Error ? error.message : 'Unknown error';
-            return {
-              content: [{ type: 'text', text: message }],
-              isError: true,
-            };
-          }
-        });
-
-        toolHandler.setServer(server);
-
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined,
-          enableJsonResponse: true,
-        });
-
-        res.on('close', () => {
-          transport.close();
-          server.close();
-        });
-
-        server
-          .connect(transport as any)
-          .then(() => {
-            transport.handleRequest(req, res);
-          })
-          .catch((err) => {
-            this.logger.error('MCP transport connect error:', err);
-            if (!res.headersSent) {
-              res.writeHead(500, { 'Content-Type': 'application/json' });
-              res.end(
-                JSON.stringify({
-                  jsonrpc: '2.0',
-                  error: { code: -32603, message: 'Internal error' },
-                  id: null,
-                })
-              );
+            if (!id) return 0;
+            legacyIdentity = id;
+            return 2;
+          },
+          requireSignedHeaders: REQUIRE_SIGNED_HEADERS,
+          logger: gatewayLogger,
+          ...shared,
+        };
+        void handleGatewayRequest(req, res, opts, ({ version, parsedBody }) => {
+          const fromV2 = version === 2 ? legacyIdentity : undefined;
+          const tier: CallerTier = fromV2 ? fromV2.tier : tierFromHeader(headerValue(req.headers[TIER_HEADER]));
+          const user = fromV2 ? fromV2.user : userFromHeader(headerValue(req.headers[USER_HEADER]));
+          // v3 only: never serve an anonymous write. (v2 already binds the user.)
+          if (version === 3 && tier === 'write' && !user) {
+            if (shared.failureLimiter.shouldEmit('write-without-user')) {
+              this.logger.warn('S2S verification failed', { reason: 'write-without-user' });
             }
-          });
-
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end('{"error":"Missing or invalid X-Gateway-S2S header"}');
+            return;
+          }
+          const toolContext: ToolContext = { tier, user };
+          this.handleMcpRequest(req, res, parsedBody, toolContext, isGatewayMode);
+        });
         return;
       }
 
@@ -417,6 +351,169 @@ Tool categories:
         resolve();
       });
     });
+  }
+
+  /**
+   * Handle one verified /mcp request. Runs only from handleGatewayRequest's
+   * onVerified, so S2S has already passed and the body has been read and parsed.
+   */
+  private handleMcpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+    parsedBody: unknown,
+    toolContext: ToolContext,
+    isGatewayMode: boolean
+  ): void {
+
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Method not allowed' },
+          id: null,
+        })
+      );
+      return;
+    }
+
+    // IT Simply: with ITSL_REQUIRE_USER_TOKEN=true the per-user token is the
+    // only accepted credential. Checked before any credential parsing, so a
+    // request carrying client credentials but no x-user-token is refused.
+    if (envFlag('ITSL_REQUIRE_USER_TOKEN')) {
+      const hasUserToken = !!headerValue(req.headers['x-user-token'])?.trim();
+      if (!hasUserToken || !isGatewayMode) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'Missing credentials',
+            message: isGatewayMode
+              ? 'This server only accepts a per-user token in x-user-token.'
+              : 'ITSL_REQUIRE_USER_TOKEN requires AUTH_MODE=gateway.',
+          })
+        );
+        return;
+      }
+    }
+
+    // Per-request handler so the caller's verified tier travels with the call.
+    let cippService = this.cippService;
+    let toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
+
+    if (isGatewayMode) {
+      const credentials = parseCredentialsFromHeaders(
+        req.headers as Record<string, string | string[] | undefined>
+      );
+
+      const hasOAuth =
+        !!credentials.tenantId && !!credentials.clientId && !!credentials.clientSecret;
+      const hasStatic = !!credentials.apiKey;
+
+      if (!credentials.baseUrl || (!hasStatic && !hasOAuth)) {
+        this.logger.warn('Gateway mode: Missing required credentials in request headers', {
+          hasBaseUrl: !!credentials.baseUrl,
+          hasApiKey: hasStatic,
+          hasOAuthCreds: hasOAuth,
+        });
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: 'Missing credentials',
+            message:
+              'Gateway mode requires x-base-url plus either x-user-token, x-api-key or (x-tenant-id + x-client-id + x-client-secret)',
+            required: ['x-base-url', 'x-user-token OR x-api-key OR (x-tenant-id + x-client-id + x-client-secret)'],
+          })
+        );
+        return;
+      }
+
+      // Header wins; otherwise the process env (default on). `??` keeps an explicit false.
+      const tokenScopeFallback =
+        credentials.tokenScopeFallback ?? this.envConfig?.cipp.tokenScopeFallback;
+
+      const requestConfig: McpServerConfig = {
+        name: this.config.name,
+        version: this.config.version,
+        cipp: {
+          baseUrl: credentials.baseUrl,
+          ...(credentials.apiKey !== undefined ? { apiKey: credentials.apiKey } : {}),
+          ...(credentials.tenantId !== undefined ? { tenantId: credentials.tenantId } : {}),
+          ...(credentials.clientId !== undefined ? { clientId: credentials.clientId } : {}),
+          ...(credentials.clientSecret !== undefined ? { clientSecret: credentials.clientSecret } : {}),
+          ...(credentials.tokenScope !== undefined ? { tokenScope: credentials.tokenScope } : {}),
+          ...(credentials.tokenUrl !== undefined ? { tokenUrl: credentials.tokenUrl } : {}),
+          ...(tokenScopeFallback !== undefined ? { tokenScopeFallback } : {}),
+        },
+      };
+
+      cippService = new CippService(requestConfig, this.logger);
+      toolHandler = new CippToolHandler(cippService, this.logger, toolContext);
+    }
+
+    const server = new Server(
+      { name: this.config.name, version: this.config.version },
+      {
+        capabilities: { tools: { listChanged: true } },
+        instructions: this.getServerInstructions(),
+      }
+    );
+
+    server.onerror = (error) => this.logger.error('MCP request server error:', error);
+
+    // Wire up handlers using the (possibly per-request) toolHandler
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: toolHandler.getToolDefinitions(),
+    }));
+
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      this.logger.debug(`Handling tool call: ${request.params.name}`);
+      try {
+        const result = await toolHandler.handleToolCall(
+          request.params.name,
+          (request.params.arguments as Record<string, unknown>) || {}
+        );
+        return { content: result.content, isError: result.isError };
+      } catch (error) {
+        this.logger.error(`Failed to call tool ${request.params.name}:`, error);
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        return {
+          content: [{ type: 'text', text: message }],
+          isError: true,
+        };
+      }
+    });
+
+    toolHandler.setServer(server);
+
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+
+    res.on('close', () => {
+      transport.close();
+      server.close();
+    });
+
+    server
+      .connect(transport as any)
+      .then(() => {
+        // Returned, so a rejection reaches the catch below instead of being dropped.
+        return transport.handleRequest(req, res, parsedBody);
+      })
+      .catch((err) => {
+        this.logger.error('MCP transport connect error:', err);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32603, message: 'Internal error' },
+              id: null,
+            })
+          );
+        }
+      });
   }
 
   /**
