@@ -74,7 +74,7 @@ let svc: CippService;
 function installFetch(specOk = true): void {
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => {
     if (url.includes('/api/GetVersion')) return Promise.resolve(jsonResponse({ version: SPEC_TEST_VERSION }));
-    if (url.startsWith('https://raw.githubusercontent.com')) {
+    if (url.startsWith('https://raw.githubusercontent.com/')) {
       const spec = specOk ? specBody(url, fixture) : undefined;
       if (spec === undefined) return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);
       return Promise.resolve(jsonResponse(spec));

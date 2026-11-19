@@ -65,4 +65,4 @@ export function specBody(url: string, spec: unknown): unknown {
 }
 
 /** Calls made to the CIPP API that are not part of loading the spec. */
-export const isSpecLoadUrl = (url: string): boolean => url.includes('/api/GetVersion') || url.includes('raw.githubusercontent.com');
+export const isSpecLoadUrl = (url: string): boolean => url.includes('/api/GetVersion') || url.startsWith('https://raw.githubusercontent.com/');
