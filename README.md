@@ -262,12 +262,10 @@ user=<upn>")`.
 |---|---|
 | `CONDUIT_S2S_SECRET` | S2S secret, required in HTTP mode (at least 32 characters; the server refuses to start without it) |
 | `ITSL_S2S_MIN_VERSION` | Minimum S2S version: `2` (default) or `3`. `1` is not a valid setting for this backend: the floor is 2 in code, so a value of 1 is silently raised to 2 and v1 is never accepted. Anything that is not 1 to 3 counts as 3. |
-| `ITSL_REQUIRE_S2S_V2` | Deprecated and ignored (logged at boot): v2 is now the floor |
 | `ITSL_REQUIRE_USER_TOKEN` | `true`: any request without `x-user-token` gets 401 |
-| `ITSL_SPEC_PATH` | CIPP endpoint serving the OpenAPI spec (default `ListOpenApiSpec`) |
 | `ITSL_SPEC_GITHUB_REPO` | Fallback spec repo (default `KelvinTegelaar/CIPP-API`) |
 
-The catalogue is projected from CIPP's OpenAPI document at first use and every 6 hours.
+The catalogue is projected from CIPP's OpenAPI document (read from GitHub for the version `GetVersion` reports) at first use and then on the first request after each 6-hour expiry, using that request's caller; there is no background timer.
 CIPP-API is AGPL-3.0: this repository never contains its `openapi.json` or code.
 
 Graph is reachable only through `cipp_graph_request`, which builds the CIPP call itself from an
