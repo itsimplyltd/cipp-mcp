@@ -13,7 +13,7 @@ import { catalogueStore } from '../src/itsl/catalogue.js';
 import { META_TOOL_DEFINITIONS, ToolContext } from '../src/itsl/meta-tools.js';
 import { computeTier } from '../src/itsl/tier.js';
 import { MESSAGE_TRACE_MAX_MESSAGES, runMessageTrace } from '../src/itsl/message-trace.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'r@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'w@example.com' };
@@ -58,7 +58,7 @@ beforeEach(() => {
   catalogueStore.reset();
   traceResponse = { Results: [msg()], Metadata: { Returned: 1, Source: 'Graph' } };
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) =>
-    Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? spec : traceResponse))
+    Promise.resolve(jsonResponse(specBody(url, spec) ?? traceResponse))
   );
   global.fetch = fetchMock as unknown as typeof fetch;
   svc = new CippService({ cipp: { baseUrl: 'https://cipp.example', apiKey: 'tok' } }, new Logger('error'));
@@ -277,7 +277,7 @@ describe('the result', () => {
 
   it('truncates a long CIPP error and marks it as an error', async () => {
     fetchMock.mockImplementation((url) =>
-      url.includes('/api/ListOpenApiSpec') ? Promise.resolve(jsonResponse(spec)) : Promise.reject(new Error('boom '.repeat(300)))
+      specBody(url, spec) !== undefined ? Promise.resolve(jsonResponse(specBody(url, spec))) : Promise.reject(new Error('boom '.repeat(300)))
     );
     const res = await handler(READ).handleToolCall(TOOL, OK);
     expect(res.isError).toBe(true);

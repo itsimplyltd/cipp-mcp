@@ -8,7 +8,7 @@ import { Logger } from '../src/utils/logger.js';
 import { catalogueStore } from '../src/itsl/catalogue.js';
 import { clearTenantCache, TENANT_CACHE_TTL_MS } from '../src/itsl/tenant.js';
 import { ToolContext } from '../src/itsl/meta-tools.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody } from './helpers.js';
 
 const logger = new Logger('error');
 const READ: ToolContext = { tier: 'read', user: 'reader@example.com' };
@@ -34,7 +34,7 @@ let tenantsPayload: unknown;
 
 function installFetch(): void {
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => {
-    if (url.includes('/api/ListOpenApiSpec')) return Promise.resolve(jsonResponse(fixture));
+    { const sb = specBody(url, fixture); if (sb !== undefined) return Promise.resolve(jsonResponse(sb)); }
     if (url.includes('/api/GetVersion')) return Promise.resolve(jsonResponse({ version: '10.9.1' }));
     if (url.startsWith('https://github.com') || url.startsWith('https://raw.githubusercontent.com')) {
       return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);

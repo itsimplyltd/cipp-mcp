@@ -17,7 +17,7 @@ import { catalogueStore } from '../src/itsl/catalogue.js';
 import { ToolContext } from '../src/itsl/meta-tools.js';
 import { buildGraphRequest, normaliseGraphPath } from '../src/itsl/graph.js';
 import { GRAPH_ALLOWED_PREFIXES } from '../src/itsl/policy.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody, isSpecLoadUrl } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'reader@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'writer@example.com' };
@@ -29,7 +29,7 @@ let svc: CippService;
 beforeEach(() => {
   catalogueStore.reset();
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) =>
-    Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? fixture : { ok: true }))
+    Promise.resolve(jsonResponse(specBody(url, fixture) ?? { ok: true }))
   );
   global.fetch = fetchMock as unknown as typeof fetch;
   svc = new CippService({ cipp: { baseUrl: 'https://cipp.example', apiKey: 'tok' } }, new Logger('error'));
@@ -39,7 +39,7 @@ afterEach(() => jest.restoreAllMocks());
 const handler = (ctx: ToolContext, logger: Logger = new Logger('error')) => new CippToolHandler(svc, logger, ctx);
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
 const cippCalls = () =>
-  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !u.includes('/api/ListOpenApiSpec'));
+  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !isSpecLoadUrl(u));
 
 describe('rule 1: Graph relays are blocked in the catalogue', () => {
   const attempts = [

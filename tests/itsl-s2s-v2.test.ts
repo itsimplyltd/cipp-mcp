@@ -8,6 +8,7 @@ jest.mock('../src/itsl/tenant.js', () => ({
 
 import { createHmac } from 'node:crypto';
 import fixture from './fixtures/openapi-fixture.json';
+import { specBody } from './helpers.js';
 import { encodeMcpUser, sha256Hex, signS2sV2, verifyS2sV2 } from '../src/itsl/s2s-v2.js';
 import { parseCredentialsFromHeaders } from '../src/utils/config.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
@@ -201,7 +202,7 @@ describe('server HTTP boundary', () => {
     global.fetch = jest.fn((input: string, init?: RequestInit) => {
       if (String(input).startsWith(`http://${HOST}:${PORT}`)) return realFetch(input, init);
       upstreamCalls.push({ url: String(input), ...(init ? { init } : {}) });
-      const payload = String(input).includes('/api/ListOpenApiSpec') ? fixture : { ok: true };
+      const payload = specBody(String(input), fixture) ?? { ok: true };
       const s = JSON.stringify(payload);
       return Promise.resolve({ ok: true, status: 200, text: async () => s, json: async () => payload } as unknown as Response);
     }) as unknown as typeof fetch;

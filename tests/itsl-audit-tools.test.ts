@@ -17,7 +17,7 @@ import { AUDIT_TOOL_ENDPOINTS, KNOWN_ENDPOINT_ROLES, namedToolTier } from '../sr
 import { DBCACHE_ALLOWED_TYPES } from '../src/itsl/policy.js';
 import { AUDIT_MAX_ROWS, AUDIT_TOOL_NAMES, restrictDbCache } from '../src/itsl/audit-tools.js';
 import { buildGraphRequest } from '../src/itsl/graph.js';
-import { errorResponse, jsonResponse } from './helpers.js';
+import { errorResponse, jsonResponse, specBody } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'r@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'w@example.com' };
@@ -59,7 +59,7 @@ beforeEach(() => {
   cache = {};
   cacheCounts = {};
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => {
-    if (url.includes('/api/ListOpenApiSpec')) return Promise.resolve(jsonResponse(spec));
+    { const sb = specBody(url, spec); if (sb !== undefined) return Promise.resolve(jsonResponse(sb)); }
     const params = new URL(url).searchParams;
     if (url.includes('/api/ListGraphRequest')) {
       const r = graph[(params.get('Endpoint') ?? '').toLowerCase()];
@@ -151,7 +151,7 @@ describe('tier and CIPP role mapping', () => {
 
   it('the live spec can only make it more restrictive: a ReadWrite role there makes the tool unavailable', async () => {
     const strict = { ...spec, paths: { ...spec.paths, '/api/ListDBCache': role('CIPP.Core.ReadWrite') } };
-    fetchMock.mockImplementation((url) => Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? strict : { Results: [] })));
+    fetchMock.mockImplementation((url) => Promise.resolve(jsonResponse(specBody(url, strict) ?? { Results: [] })));
     await handler(READ).handleToolCall('cipp_search_tools', {}); // loads the live spec
     const res = await run(SPAM);
     expect(res.isError).toBe(true);
@@ -843,7 +843,7 @@ describe('ListDBCache type allow-list through cipp_exec_read', () => {
     });
     it('a non-list answer from CIPP is an error, never passed through raw', async () => {
       fetchMock.mockImplementation((url) =>
-        Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? spec : { Results: 'CIPP says no', secretText: 'SECRET-VALUE-1' }))
+        Promise.resolve(jsonResponse(specBody(url, spec) ?? { Results: 'CIPP says no', secretText: 'SECRET-VALUE-1' }))
       );
       catalogueStore.reset();
       const res = await exec({ type: 'AuthorizationPolicy' });

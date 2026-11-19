@@ -49,3 +49,20 @@ export function queryOf(
   if (!call) throw new Error(`no request was sent to ${endpoint}`);
   return new URL(call[0]).searchParams;
 }
+
+/** The CIPP version the spec stubs report. */
+export const SPEC_TEST_VERSION = '11.0.2';
+
+/**
+ * Stub for the spec load: `GetVersion` answers with a version and the GitHub tag file
+ * (`.../Config/openapi.json`) answers with `spec`. Returns undefined for every other URL.
+ * (CIPP itself has no spec endpoint, so the catalogue reads it from GitHub.)
+ */
+export function specBody(url: string, spec: unknown): unknown {
+  if (url.includes('/api/GetVersion')) return { version: SPEC_TEST_VERSION };
+  if (/^https:\/\/raw\.githubusercontent\.com\/.+\/Config\/openapi\.json$/.test(url)) return spec;
+  return undefined;
+}
+
+/** Calls made to the CIPP API that are not part of loading the spec. */
+export const isSpecLoadUrl = (url: string): boolean => url.includes('/api/GetVersion') || url.includes('raw.githubusercontent.com');
