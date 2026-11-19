@@ -17,7 +17,7 @@ import { TOOL_DEFINITIONS } from '../src/mcp/tool.definitions.js';
 import { catalogueStore } from '../src/itsl/catalogue.js';
 import { NAMED_TOOL_ENDPOINTS, namedToolTier } from '../src/itsl/named-tools.js';
 import { META_TOOL_NAMES, ToolContext, WRITE_ONLY_META_TOOLS } from '../src/itsl/meta-tools.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, isSpecLoadUrl, specBody, SPEC_TEST_VERSION } from './helpers.js';
 
 const logger = new Logger('error');
 const READ: ToolContext = { tier: 'read', user: 'reader@example.com' };
@@ -70,16 +70,14 @@ type FetchMock = jest.Mock<Promise<Response>, [string, RequestInit?]>;
 let fetchMock: FetchMock;
 let svc: CippService;
 
-/** CIPP stub: serves the fixture spec for ListOpenApiSpec, `{ok:true}` for everything else. */
+/** CIPP stub: serves the fixture spec from the GitHub tag file (404 when !specOk), `{ok:true}` for everything else. */
 function installFetch(specOk = true): void {
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => {
-    if (url.includes('/api/ListOpenApiSpec')) {
-      if (!specOk) return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);
-      return Promise.resolve(jsonResponse(fixture));
-    }
-    if (url.includes('/api/GetVersion')) return Promise.resolve(jsonResponse({ version: '10.9.1' }));
-    if (url.startsWith('https://github.com') || url.startsWith('https://raw.githubusercontent.com')) {
-      return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);
+    if (url.includes('/api/GetVersion')) return Promise.resolve(jsonResponse({ version: SPEC_TEST_VERSION }));
+    if (url.startsWith('https://raw.githubusercontent.com/')) {
+      const spec = specOk ? specBody(url, fixture) : undefined;
+      if (spec === undefined) return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);
+      return Promise.resolve(jsonResponse(spec));
     }
     return Promise.resolve(jsonResponse({ ok: true }));
   });
@@ -87,7 +85,7 @@ function installFetch(specOk = true): void {
 }
 
 const cippCalls = (): string[] =>
-  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !u.includes('/api/ListOpenApiSpec'));
+  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !isSpecLoadUrl(u));
 
 const handler = (ctx: ToolContext) => new CippToolHandler(svc, logger, ctx);
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
@@ -130,7 +128,7 @@ describe('named tools: tier from the CIPP endpoint they call', () => {
     // Spec says ListUsers is ReadWrite: the named tool must stop being read.
     const tightened = JSON.parse(JSON.stringify(fixture));
     tightened.paths['/api/ListUsers'] = { get: { 'x-cipp-role': 'Identity.User.ReadWrite' } };
-    fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>(() => Promise.resolve(jsonResponse(tightened)));
+    fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => Promise.resolve(jsonResponse(specBody(url, tightened) ?? tightened)));
     global.fetch = fetchMock as unknown as typeof fetch;
     await handler(READ).handleToolCall('cipp_search_tools', {}); // loads the catalogue
     const res = await handler(READ).handleToolCall('cipp_list_users', { tenantFilter: 't' });

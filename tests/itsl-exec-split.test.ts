@@ -12,7 +12,7 @@ import { CippToolHandler } from '../src/handlers/tool.handler.js';
 import { Logger } from '../src/utils/logger.js';
 import { catalogueStore } from '../src/itsl/catalogue.js';
 import { META_TOOL_DEFINITIONS, ToolContext } from '../src/itsl/meta-tools.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody, isSpecLoadUrl } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'r@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'w@example.com' };
@@ -23,7 +23,7 @@ let svc: CippService;
 beforeEach(() => {
   catalogueStore.reset();
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) =>
-    Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? fixture : { ok: true }))
+    Promise.resolve(jsonResponse(specBody(url, fixture) ?? { ok: true }))
   );
   global.fetch = fetchMock as unknown as typeof fetch;
   svc = new CippService({ cipp: { baseUrl: 'https://cipp.example', apiKey: 'tok' } }, new Logger('error'));
@@ -34,7 +34,7 @@ const handler = (ctx: ToolContext) => new CippToolHandler(svc, new Logger('error
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
 const body = (r: { content: Array<{ text: string }> }) => text(r).split('\n').slice(1).join('\n');
 const cippCalls = () =>
-  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !u.includes('/api/ListOpenApiSpec'));
+  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !isSpecLoadUrl(u));
 const names = (ctx: ToolContext) => handler(ctx).getToolDefinitions().map((t) => t.name);
 
 describe('listing and annotations', () => {

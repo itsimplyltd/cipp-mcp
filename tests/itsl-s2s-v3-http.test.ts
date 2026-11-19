@@ -8,6 +8,7 @@ jest.mock('../src/itsl/tenant.js', () => ({
 
 import { connect } from 'node:net';
 import fixture from './fixtures/openapi-fixture.json';
+import { specBody } from './helpers.js';
 import { signV1, signV2, signV3, encodeUser } from './s2s-v3-signer.js';
 import type { CippMcpServer as CippMcpServerType } from '../src/mcp/server.js';
 
@@ -17,7 +18,7 @@ const PORT = 47534;
 const TOKEN = 'eyJ.user-token-for-v3-http-tests.sig';
 const BASE = 'https://cipp.example';
 const ENV_KEYS = [
-  'CONDUIT_S2S_SECRET', 'ITSL_REQUIRE_S2S_V2', 'ITSL_REQUIRE_USER_TOKEN', 'ITSL_S2S_MIN_VERSION',
+  'CONDUIT_S2S_SECRET', 'ITSL_REQUIRE_USER_TOKEN', 'ITSL_S2S_MIN_VERSION',
   'AUTH_MODE', 'MCP_TRANSPORT', 'MCP_HTTP_PORT', 'MCP_HTTP_HOST',
 ];
 
@@ -124,7 +125,7 @@ describe('S2S v2 + v3 at the HTTP boundary (floor 2)', () => {
     global.fetch = jest.fn((input: string, init?: RequestInit) => {
       if (String(input).startsWith(`http://${HOST}:${PORT}`)) return realFetch(input, init);
       upstreamCalls.push({ url: String(input), ...(init ? { init } : {}) });
-      const payload = String(input).includes('/api/ListOpenApiSpec') ? fixture : { ok: true };
+      const payload = specBody(String(input), fixture) ?? { ok: true };
       const s = JSON.stringify(payload);
       return Promise.resolve({ ok: true, status: 200, text: async () => s, json: async () => payload } as unknown as Response);
     }) as unknown as typeof fetch;
@@ -368,24 +369,27 @@ describe('S2S v2 + v3 at the HTTP boundary (floor 2)', () => {
       });
     });
 
-    it('ITSL_REQUIRE_S2S_V2 is logged as deprecated and ignored: v1 is still refused, nothing is loosened', async () => {
-      process.env.ITSL_REQUIRE_S2S_V2 = 'false';
-      const prev = process.env.MCP_HTTP_PORT;
+    it('logs one S2S configuration line at startup: no secret, no length', async () => {
+      const prevMin = process.env.ITSL_S2S_MIN_VERSION;
+      const prevPort = process.env.MCP_HTTP_PORT;
+      process.env.ITSL_S2S_MIN_VERSION = '3';
       process.env.MCP_HTTP_PORT = String(PORT + 2);
       const s = makeServer();
       try {
         await s.start();
-        expect(logs.some((l) => l.level === 'warn' && l.line.includes('ITSL_REQUIRE_S2S_V2 is deprecated'))).toBe(true);
-        const res = await realFetch(`http://${HOST}:${PORT + 2}/mcp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'x-gateway-s2s': signV1(SECRET), 'x-user-token': TOKEN, 'x-base-url': BASE },
-          body: JSON.stringify(listTools),
-        });
-        expect(res.status).toBe(401);
+        const lines = logs.filter((l) => l.line.includes('S2S configuration'));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]!.line).toMatch(/"floor":2/);
+        expect(lines[0]!.line).toMatch(/"minVersion":3/);
+        expect(lines[0]!.line).toMatch(/"minVersionSource":"env"/);
+        expect(lines[0]!.line).toContain('x-user-token');
+        expect(lines[0]!.line).not.toContain(SECRET);
+        expect(lines[0]!.line).not.toMatch(/length/i);
       } finally {
         await s.stop();
-        delete process.env.ITSL_REQUIRE_S2S_V2;
-        process.env.MCP_HTTP_PORT = prev;
+        if (prevMin === undefined) delete process.env.ITSL_S2S_MIN_VERSION;
+        else process.env.ITSL_S2S_MIN_VERSION = prevMin;
+        process.env.MCP_HTTP_PORT = prevPort;
       }
     });
   });

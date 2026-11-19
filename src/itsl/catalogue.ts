@@ -259,12 +259,11 @@ export interface CatalogueLogger {
 
 export const CATALOGUE_TTL_MS = 6 * 60 * 60 * 1000;
 const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
-/** Background retry interval while the catalogue has not loaded (or a refresh failed). */
-export const CATALOGUE_RETRY_MS = 10 * 60 * 1000;
 
 /**
  * Holds the last good catalogue. Lazy: built on the first request, refreshed
- * when older than the TTL. A failed refresh keeps serving the last good copy;
+ * on the request path when older than the TTL, always with THAT request's fetchers
+ * (their token is current; nothing is retained from an earlier caller). A failed refresh keeps serving the last good copy;
  * with none, `get` throws a clear error (named tools do not need it).
  */
 export class CatalogueStore {
@@ -274,13 +273,10 @@ export class CatalogueStore {
   private lastVersion: string | undefined;
   private lastError: unknown;
   private seen = new Set<string>();
-  private bgTimer: ReturnType<typeof setTimeout> | undefined;
-  private bgStarted = false;
 
   constructor(
     private readonly ttlMs = CATALOGUE_TTL_MS,
-    private readonly clock: () => number = Date.now,
-    private readonly retryMs = CATALOGUE_RETRY_MS
+    private readonly clock: () => number = Date.now
   ) {}
 
   /** The loaded catalogue, if any, without triggering a fetch. */
@@ -295,41 +291,6 @@ export class CatalogueStore {
     this.lastFailureAt = 0;
     this.lastError = undefined;
     this.seen = new Set();
-    if (this.bgTimer) clearTimeout(this.bgTimer);
-    this.bgTimer = undefined;
-    this.bgStarted = false;
-  }
-
-  /**
-   * Recovery without a restart. Started once, by the first `get`: loads (or
-   * reloads) in the background, every `retryMs` while there is no catalogue or
-   * the last refresh failed, and every `ttlMs` once it succeeds. A failed
-   * refresh never replaces the current catalogue (see `refresh`). The timer is
-   * unref'd so it never keeps the process alive.
-   */
-  private ensureBackground(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): void {
-    if (this.bgStarted) return;
-    this.bgStarted = true;
-    const schedule = (delay: number): void => {
-      this.bgTimer = setTimeout(() => void tick(), delay);
-      this.bgTimer.unref?.();
-    };
-    const tick = async (): Promise<void> => {
-      let ok = false;
-      try {
-        await this.load(fetchers, logger);
-        ok = true;
-      } catch (err) {
-        logger.warn('CIPP catalogue background load failed', {
-          error: errMsg(err),
-          retryInMs: this.retryMs,
-          haveCatalogue: this.current !== undefined,
-        });
-      }
-      schedule(ok ? this.ttlMs : this.retryMs);
-    };
-    // The first attempt is the request that triggered us; if it succeeded the next is a TTL away.
-    schedule(this.current ? this.ttlMs : this.retryMs);
   }
 
   /** One shared load; records the failure time and error. Replaces `current` only on success. */
@@ -340,7 +301,9 @@ export class CatalogueStore {
       });
     }
     try {
-      return await this.inFlight;
+      const cat = await this.inFlight;
+      this.lastError = undefined;
+      return cat;
     } catch (err) {
       this.lastFailureAt = this.clock();
       this.lastError = err;
@@ -351,22 +314,15 @@ export class CatalogueStore {
   async get(fetchers: readonly SpecFetcher[], logger: CatalogueLogger): Promise<Catalogue> {
     const now = this.clock();
     if (this.current && now - this.current.builtAt < this.ttlMs) return this.current;
-    // Within the back-off after a failure, keep serving the stale copy rather than hammering CIPP.
-    if (this.current && this.lastFailureAt > 0 && now - this.lastFailureAt < FAILURE_BACKOFF_MS) {
-      return this.current;
-    }
-    // No catalogue yet and a recent failure: the background loop owns the retries; do not
-    // hit CIPP and GitHub (60 unauthenticated calls/hour) on every request.
-    if (!this.current && this.lastError !== undefined && now - this.lastFailureAt < this.retryMs) {
-      this.ensureBackground(fetchers, logger);
+    // Within the back-off after a failure, do not hit CIPP and GitHub (60 unauthenticated
+    // calls/hour) again: serve the stale copy, or repeat the last error if there is none.
+    if (this.lastError !== undefined && now - this.lastFailureAt < FAILURE_BACKOFF_MS) {
+      if (this.current) return this.current;
       throw this.lastError;
     }
     try {
-      const cat = await this.load(fetchers, logger);
-      this.ensureBackground(fetchers, logger);
-      return cat;
+      return await this.load(fetchers, logger);
     } catch (err) {
-      this.ensureBackground(fetchers, logger);
       if (this.current) {
         logger.warn('CIPP spec refresh failed; serving the last good catalogue', { error: errMsg(err) });
         return this.current;
@@ -478,22 +434,22 @@ async function fetchGithubApi(url: string, fetchImpl: typeof fetch): Promise<unk
 }
 
 /**
- * Sources, in order:
- *  1. our own CIPP's `GET /api/ListOpenApiSpec` with the caller's token (path overridable with ITSL_SPEC_PATH).
- *  2. the `openapi.enriched.json` asset on the CIPP-API GitHub release that matches `GET /api/GetVersion`.
- *  3. `Config/openapi.json` of that release tag, fetched at runtime (never stored in this repo).
- *  4. `Config/openapi.json` from a branch (ITSL_SPEC_BRANCHES, default master,dev) whose
+ * Sources, in order (all read the spec from GitHub; none needs the caller's token except GetVersion):
+ *  1. `Config/openapi.json` of the release tag that matches `GET /api/GetVersion`.
+ *  2. `Config/openapi.json` from a branch (ITSL_SPEC_BRANCHES, default master,dev) whose
  *     `version_latest.txt` EQUALS the reported version exactly. A branch with a different
  *     version is never used (unreleased code would drift the tiers). Needed because CIPP
  *     versions can run ahead of the repo's tags.
- *  5. `Config/openapi.json` at the COMMIT on a branch (master, then dev) whose `version_latest.txt`
+ *  3. `Config/openapi.json` at the COMMIT on a branch (master, then dev) whose `version_latest.txt`
  *     equals the reported version exactly, found through the GitHub commits API (unauthenticated,
  *     read-only, at most 30 commits per branch). CIPP-API stopped publishing releases and tags
- *     after 10.9.1 and the branches run ahead of the deployed version, so (2)-(4) cannot match.
- * (2) and (3) exist because (1) could not be confirmed to exist in CIPP's public code; see the build report.
+ *     after 10.9.1 and the branches run ahead of the deployed version, so (1) and (2) may not match.
+ * Our own CIPP has no `ListOpenApiSpec` endpoint and upstream publishes no release asset, so neither is tried.
+ *
+ * The returned fetchers are built per request (see loadCatalogue), so the GetVersion memo below lives
+ * for one load only: a CIPP upgrade is noticed by the first load after the TTL.
  */
 export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetch): SpecFetcher[] {
-  const specPath = process.env.ITSL_SPEC_PATH || 'ListOpenApiSpec';
   const repo = process.env.ITSL_SPEC_GITHUB_REPO || 'KelvinTegelaar/CIPP-API';
   let tagPromise: Promise<string> | undefined;
   const releaseTag = (): Promise<string> => {
@@ -507,19 +463,19 @@ export function defaultSpecFetchers(api: SpecApi, fetchImpl: typeof fetch = fetc
   };
   const reported = (): Promise<string> => releaseTag();
   const branches = (process.env.ITSL_SPEC_BRANCHES || 'master,dev').split(',').map((b) => b.trim()).filter(Boolean);
+  let tagUsed: string | undefined;
   let matched: string | undefined;
   let historyMatched: string | undefined;
   return [
-    { name: 'cipp-api', fetch: () => api.callEndpoint('GET', specPath, undefined, undefined, SPEC_TIMEOUT_MS) },
-    {
-      name: 'github-release-asset',
-      fetch: async () =>
-        fetchJson(`https://github.com/${repo}/releases/download/${await releaseTag()}/openapi.enriched.json`, fetchImpl),
-    },
     {
       name: 'github-tag-file',
-      fetch: async () =>
-        fetchJson(`https://raw.githubusercontent.com/${repo}/${await releaseTag()}/Config/openapi.json`, fetchImpl),
+      version: () => tagUsed,
+      fetch: async () => {
+        const tag = await releaseTag();
+        const spec = await fetchJson(`https://raw.githubusercontent.com/${repo}/${tag}/Config/openapi.json`, fetchImpl);
+        tagUsed = tag;
+        return spec;
+      },
     },
     {
       name: 'github-branch-matching-version',

@@ -21,6 +21,7 @@ import {
   NonceCache,
   ReportRateLimiter,
   assertRequireSignedHeaders,
+  effectiveMinVersion,
   handleGatewayRequest,
   type GatewayOptions,
 } from '../itsl/s2s-v3.js';
@@ -260,12 +261,18 @@ Tool categories:
       this.logger.error(msg);
       throw new Error(msg);
     }
-    if (process.env.ITSL_REQUIRE_S2S_V2 !== undefined) {
-      this.logger.warn(
-        'ITSL_REQUIRE_S2S_V2 is deprecated and ignored: S2S v2 is now the floor (v1 is never accepted).'
-      );
-    }
     assertRequireSignedHeaders(REQUIRE_SIGNED_HEADERS);
+    // One line at startup so the live S2S posture is visible in the logs. Informational only:
+    // ITSL_S2S_MIN_VERSION is still read on every request (below), exactly as interpreted here.
+    // Never log the secret or its length.
+    const rawMinVersion = process.env.ITSL_S2S_MIN_VERSION;
+    const configuredMin = Number(rawMinVersion ?? '2');
+    this.logger.info('S2S configuration', {
+      floor: S2S_FLOOR,
+      minVersion: effectiveMinVersion(S2S_FLOOR, configuredMin),
+      minVersionSource: rawMinVersion === undefined ? 'default' : Number.isInteger(configuredMin) && configuredMin >= 1 && configuredMin <= 3 ? 'env' : 'env-invalid-counts-as-3',
+      requireSignedHeaders: REQUIRE_SIGNED_HEADERS,
+    });
 
     // One nonce cache and one set of limiters for the life of the process.
     const shared = {

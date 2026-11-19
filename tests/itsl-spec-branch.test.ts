@@ -91,7 +91,7 @@ describe('github-branch-matching-version', () => {
     const t = setup({ [`${RAW}/master/version_latest.txt`]: '11.0.2', [`${RAW}/master/Config/openapi.json`]: fixture });
     await t.get();
     const sources = t.logs.warn.mock.calls.filter(([m]) => m === 'CIPP spec source failed').map(([, meta]) => (meta as { source: string }).source);
-    expect(sources).toEqual(['cipp-api', 'github-release-asset', 'github-tag-file']);
+    expect(sources).toEqual(['github-tag-file']);
     for (const [, meta] of t.logs.warn.mock.calls) expect(typeof (meta as { error: string }).error).toBe('string');
     expect(t.logs.debug).not.toHaveBeenCalledWith('CIPP spec source failed', expect.anything());
   });

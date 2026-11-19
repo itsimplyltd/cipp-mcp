@@ -23,7 +23,7 @@ import { buildGraphRequest, normaliseGraphPath } from '../src/itsl/graph.js';
 import { frameLine, MAX_ERROR_CHARS } from '../src/itsl/frame.js';
 import { ITSL_OWN_TENANT_IDS, MICROSOFT_FIRST_PARTY_TENANT_IDS } from '../src/itsl/policy.js';
 import { appToggleTiming, runAppToggle, SP_SELECT } from '../src/itsl/app-toggle.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody, isSpecLoadUrl } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'r@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'w@example.com' };
@@ -70,7 +70,7 @@ beforeEach(() => {
   staleReadsLeft = 0;
   graphReadOverride = undefined;
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url, init) => {
-    if (url.includes('/api/ListOpenApiSpec')) return Promise.resolve(jsonResponse(fixture));
+    { const sb = specBody(url, fixture); if (sb !== undefined) return Promise.resolve(jsonResponse(sb)); }
     if (url.includes('/api/ListGraphRequest')) {
       if (graphReadOverride) return Promise.resolve(graphReadOverride(url));
       if (sp === null) {
@@ -104,7 +104,7 @@ const handler = (ctx: ToolContext) => new CippToolHandler(svc, new Logger('error
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
 const payload = (r: { content: Array<{ text: string }> }) => JSON.parse(text(r).split('\n').slice(1).join('\n'));
 const cippCalls = () =>
-  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !u.includes('/api/ListOpenApiSpec'));
+  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !isSpecLoadUrl(u));
 const writes = () => fetchMock.mock.calls.filter(([u]) => u.includes('/api/ExecApplication'));
 const reads = () => fetchMock.mock.calls.filter(([u]) => u.includes('/api/ListGraphRequest'));
 const names = (ctx: ToolContext) => handler(ctx).getToolDefinitions().map((t) => t.name);

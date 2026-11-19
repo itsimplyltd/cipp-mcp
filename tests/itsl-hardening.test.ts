@@ -14,7 +14,7 @@ import { catalogueStore } from '../src/itsl/catalogue.js';
 import { ToolContext } from '../src/itsl/meta-tools.js';
 import { normaliseGraphPath, buildGraphRequest } from '../src/itsl/graph.js';
 import { frameLine, MAX_ERROR_CHARS } from '../src/itsl/frame.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'reader@example.com' };
 const WRITE: ToolContext = { tier: 'write', user: 'writer@example.com' };
@@ -25,7 +25,7 @@ let svc: CippService;
 
 function install(respond?: (url: string) => Response): void {
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) =>
-    Promise.resolve(respond?.(url) ?? jsonResponse(url.includes('/api/ListOpenApiSpec') ? fixture : { ok: true }))
+    Promise.resolve(respond?.(url) ?? jsonResponse(specBody(url, fixture) ?? { ok: true }))
   );
   global.fetch = fetchMock as unknown as typeof fetch;
 }
@@ -192,7 +192,7 @@ describe('d) CIPP errors are echoed truncated to 500 characters and framed', () 
   });
 
   it('an exec error is framed and truncated', async () => {
-    install((url) => (url.includes('/api/ListThings') ? ({ ok: false, status: 500, text: async () => longBody } as unknown as Response) : jsonResponse(url.includes('ListOpenApiSpec') ? fixture : {})));
+    install((url) => (url.includes('/api/ListThings') ? ({ ok: false, status: 500, text: async () => longBody } as unknown as Response) : jsonResponse(specBody(url, fixture) ?? {})));
     const res = await handler(READ).handleToolCall('cipp_exec_read', { name: 'ListThings', arguments: { tenantFilter: 'contoso.com' } });
     expect(res.isError).toBe(true);
     expect(text(res).split('\n')[0]).toBe(frameLine('contoso.com'));

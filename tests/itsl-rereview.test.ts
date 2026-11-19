@@ -16,7 +16,7 @@ import { ToolContext } from '../src/itsl/meta-tools.js';
 import { buildGraphRequest, normaliseGraphPath } from '../src/itsl/graph.js';
 import { validateArgumentValues } from '../src/itsl/values.js';
 import { GRAPH_ALLOWED_PREFIXES, VALUE_SLASH_ALLOWED_KEYS } from '../src/itsl/policy.js';
-import { jsonResponse } from './helpers.js';
+import { jsonResponse, specBody, isSpecLoadUrl } from './helpers.js';
 
 const READ: ToolContext = { tier: 'read', user: 'reader@example.com' };
 type FetchMock = jest.Mock<Promise<Response>, [string, RequestInit?]>;
@@ -26,7 +26,7 @@ let svc: CippService;
 beforeEach(() => {
   catalogueStore.reset();
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) =>
-    Promise.resolve(jsonResponse(url.includes('/api/ListOpenApiSpec') ? fixture : { ok: true }))
+    Promise.resolve(jsonResponse(specBody(url, fixture) ?? { ok: true }))
   );
   global.fetch = fetchMock as unknown as typeof fetch;
   svc = new CippService({ cipp: { baseUrl: 'https://cipp.example', apiKey: 'tok' } }, new Logger('error'));
@@ -36,7 +36,7 @@ afterEach(() => jest.restoreAllMocks());
 const handler = (ctx: ToolContext = READ) => new CippToolHandler(svc, new Logger('error'), ctx);
 const text = (r: { content: Array<{ text: string }> }) => r.content[0]!.text;
 const cippCalls = () =>
-  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !u.includes('/api/ListOpenApiSpec'));
+  fetchMock.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://cipp.example/api/') && !isSpecLoadUrl(u));
 
 describe('N1: argument value validation, centrally, before dispatch', () => {
   // The reviewer's actual payloads (probe3).
