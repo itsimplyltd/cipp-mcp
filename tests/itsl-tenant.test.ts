@@ -36,7 +36,7 @@ function installFetch(): void {
   fetchMock = jest.fn<Promise<Response>, [string, RequestInit?]>((url) => {
     { const sb = specBody(url, fixture); if (sb !== undefined) return Promise.resolve(jsonResponse(sb)); }
     if (url.includes('/api/GetVersion')) return Promise.resolve(jsonResponse({ version: '10.9.1' }));
-    if (url.startsWith('https://github.com') || url.startsWith('https://raw.githubusercontent.com')) {
+    if (/^https:\/\/(github\.com|raw\.githubusercontent\.com)\//.test(url)) {
       return Promise.resolve({ ok: false, status: 404, text: async () => 'nope' } as unknown as Response);
     }
     if (url.includes('/api/ListTenants?') || url.endsWith('/api/ListTenants')) {
