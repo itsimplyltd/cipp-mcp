@@ -103,7 +103,10 @@ describe('CippService.listDomainHealth', () => {
     expect(result[0]).toMatchObject({ domain: 'contoso.com' });
 
     const calls = fetchMock.mock.calls.map((c) => c[0] as string);
-    expect(calls.some((c) => c.includes('onmicrosoft.com'))).toBe(false);
+    // Every per-domain check names contoso.com in its Domain parameter; the routing domain is never sent.
+    const checked = calls.map((c) => new URL(c).searchParams.get('Domain')).filter((d): d is string => d !== null);
+    expect(checked.length).toBeGreaterThan(0);
+    expect(checked.every((d) => d === 'contoso.com')).toBe(true);
   });
 
   it('bounds each per-domain DNS check with an abort signal', async () => {

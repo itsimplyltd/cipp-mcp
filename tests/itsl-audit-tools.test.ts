@@ -593,7 +593,7 @@ describe('refusals', () => {
       await refused(tool, { ...base, tenantFilter: t }, /AllTenants is not allowed/);
     });
     it.each(['Endpoint', 'endpoint', 'select', '$select', 'filter', 'expand', 'top', 'type', 'Version', 'cmdlet', 'days', 'somethingElse'])('refuses the extra argument %s', async (k) => {
-      await refused(tool, { ...base, [k]: 'x' }, new RegExp(`unexpected or repeated argument '${k.replace('$', '\\$')}'`));
+      await refused(tool, { ...base, [k]: 'x' }, new RegExp(`unexpected or repeated argument '${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
     });
     it('refuses a missing tenant', async () => refused(tool, { ...base, tenantFilter: undefined }, /tenantFilter/));
     it('refuses a malformed tenant', async () => refused(tool, { ...base, tenantFilter: 'a b' }, /tenantFilter must be/));

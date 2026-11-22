@@ -94,7 +94,7 @@ describe('N1: argument value validation, centrally, before dispatch', () => {
     (key) => {
       expect(validateArgumentValues({ [key]: 'a/b' })).toBeUndefined();
       for (const bad of ['a/../b', 'a/b#c', 'a\\b', 'a\u0000b', 'a\nb']) {
-        expect(validateArgumentValues({ [key]: bad })).toMatch(new RegExp(`argument '${key.replace('$', '\\$')}'`));
+        expect(validateArgumentValues({ [key]: bad })).toMatch(new RegExp(`argument '${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
       }
     }
   );
